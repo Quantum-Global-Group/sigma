@@ -1,9 +1,15 @@
 import numpy as np
 import pandas as pd
 
+from config import settings
 
-def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute technical indicator features from OHLCV data."""
+
+def build_features(df: pd.DataFrame, headlines: list[str] | None = None) -> pd.DataFrame:
+    """Compute technical indicator features from OHLCV data.
+
+    If `headlines` is provided and HUGGINGFACE_TOKEN is set, a `sentiment_score`
+    feature is appended (constant across all rows for this snapshot).
+    """
     out = pd.DataFrame(index=df.index)
 
     close = df["close"]
@@ -31,6 +37,15 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Returns
     out["ret_1d"] = close.pct_change(1)
     out["ret_5d"] = close.pct_change(5)
+
+    # Optional sentiment (FinBERT) — added only when token is configured
+    if headlines and settings.huggingface_token:
+        try:
+            from ml.sentiment import score_headlines
+            score = score_headlines(headlines)
+            out["sentiment_score"] = score
+        except Exception:
+            pass
 
     return out.dropna()
 

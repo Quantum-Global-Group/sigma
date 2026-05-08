@@ -122,6 +122,21 @@ class Settings(BaseSettings):
                     continue
         return out
 
+    # Exits (razorBill — consumed by worker.tick when use_advanced_exits=True)
+    use_advanced_exits: bool = True
+    stop_loss_pct: float = 0.01           # 1%
+    take_profit_pct: float = 0.02         # 2%
+    trailing_stop_pct: float = 0.01       # 1%
+    trailing_stop_pct_after_tp: float = 0.01
+    trailing_lookback_bars: int = 60
+    move_stop_to_breakeven: bool = True
+    max_hold_hours: int = 24
+    exit_on_negative_signal: bool = True
+    signal_exit_threshold: float = -0.3
+
+    # Rebuy guard — prevent immediate re-entry after a SELL on the same symbol.
+    rebuy_cooldown_min: int = 15
+
     # RankingModel (razorBill-derived crypto regressor)
     ranking_window: int = 30                # bars per training/inference sequence
     pred_horizon_bars: int = 3              # forward return horizon for label

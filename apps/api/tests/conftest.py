@@ -37,11 +37,25 @@ MOCK_AUTH = (_FakeAPIKey(), _FakeUser())
 
 
 async def _fake_db():
-    """Yield a no-op async session mock — prevents real DB calls in unit tests."""
+    """Yield a no-op async session mock — prevents real DB calls in unit tests.
+
+    `execute` is an AsyncMock that returns a result whose `scalars().all()`
+    and `scalar_one_or_none()` give empty defaults. Tests that need specific
+    rows can override `mock_session.execute.return_value` after acquiring
+    the dep override."""
     mock_session = MagicMock()
     mock_session.add = MagicMock()
+    mock_session.flush = AsyncMock()
     mock_session.commit = AsyncMock()
     mock_session.close = AsyncMock()
+
+    empty_result = MagicMock()
+    empty_result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+    empty_result.scalar_one_or_none = MagicMock(return_value=None)
+    empty_result.all = MagicMock(return_value=[])
+    empty_result.scalar_one = MagicMock(return_value=0)
+    mock_session.execute = AsyncMock(return_value=empty_result)
+
     yield mock_session
 
 

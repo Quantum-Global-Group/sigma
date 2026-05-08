@@ -41,5 +41,6 @@ def test_in_cooldown_handles_naive_datetime(monkeypatch):
 
     from worker.tick import _in_cooldown
 
-    naive = datetime.utcnow() - timedelta(minutes=5)  # naive
+    # Build a tz-naive datetime without using the deprecated `utcnow()`.
+    naive = (datetime.now(timezone.utc) - timedelta(minutes=5)).replace(tzinfo=None)
     assert _in_cooldown("BTC-USD", {"BTC-USD": naive}) is True

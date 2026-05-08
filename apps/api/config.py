@@ -1,4 +1,19 @@
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class StrategyParams(BaseModel):
+    """razorBill nested risk/strategy parameters. Accessed as
+    `settings.strategy.{kelly_cap, risk_var_95, risk_max_drawdown}`."""
+
+    weight_model: float = Field(default=0.6, ge=0.0, le=1.0)
+    weight_sent: float = Field(default=0.2, ge=0.0, le=1.0)
+    weight_regime: float = Field(default=0.2, ge=0.0, le=1.0)
+    risk_var_95: float = Field(default=0.02, ge=0.0)
+    risk_max_drawdown: float = Field(default=0.25, ge=0.0, le=1.0)
+    kelly_cap: float = Field(default=0.25, ge=0.0, le=1.0)
+    broker_fee_bps: int = Field(default=5, ge=0)
+    slippage_bps: int = Field(default=5, ge=0)
 
 
 class Settings(BaseSettings):
@@ -82,6 +97,28 @@ class Settings(BaseSettings):
     enabled_strategies: str = "momentum,mean_reversion,breakout,regime,ml"
     strategy_weights: str = "0.2,0.2,0.2,0.2,0.2"
     min_signal_confidence: float = 0.3
+    strategy: StrategyParams = StrategyParams()
+
+    # Risk / sizing (razorBill — referenced by apps/api/risk/)
+    portfolio_max_exposure: float = 0.6     # fraction of equity buys cap at
+    min_cash_reserve_usd: float = 25.0
+    max_concurrent_positions: int = 6
+    max_portfolio_loss_pct: float = 0.10
+    max_daily_loss_pct: float = 0.05
+    per_trade_notional_cap_usd: float = 0.0  # 0 disables
+    per_symbol_notional_caps: str = ""        # e.g. "PEPE:75,API3:50"
+
+    @property
+    def per_symbol_caps_map(self) -> dict[str, float]:
+        out: dict[str, float] = {}
+        for part in self.per_symbol_notional_caps.split(","):
+            if ":" in part:
+                k, v = part.split(":", 1)
+                try:
+                    out[k.strip().upper()] = float(v.strip())
+                except ValueError:
+                    continue
+        return out
 
     # RankingModel (razorBill-derived crypto regressor)
     ranking_window: int = 30                # bars per training/inference sequence

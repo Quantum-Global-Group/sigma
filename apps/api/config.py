@@ -78,5 +78,24 @@ class Settings(BaseSettings):
     worker_tick_seconds_crypto: int = 300
     worker_tick_seconds_equity: int = 900
 
+    # RankingModel (razorBill-derived crypto regressor)
+    ranking_window: int = 30                # bars per training/inference sequence
+    pred_horizon_bars: int = 3              # forward return horizon for label
+    ranking_signal_threshold: float = 0.005 # |predicted_return| above this → BUY/SELL
+    lgb_n_estimators: int = 200
+    lgb_learning_rate: float = 0.05
+    lgb_max_depth: int = -1
+    lgb_subsample: float = 0.8
+    lgb_colsample_bytree: float = 0.8
+    lgb_reg_alpha: float = 0.0
+    lgb_reg_lambda: float = 1.0
+    xgb_n_estimators: int = 300
+    xgb_learning_rate: float = 0.05
+    xgb_max_depth: int = 6
+    xgb_subsample: float = 0.8
+    xgb_colsample_bytree: float = 0.8
+    xgb_reg_alpha: float = 0.0
+    xgb_reg_lambda: float = 1.0
+
 
 settings = Settings()

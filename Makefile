@@ -1,4 +1,4 @@
-.PHONY: dev migrate seed test lint format logs clean help package-gumroad load-test worker worker-local
+.PHONY: dev migrate seed test lint format logs clean help package-gumroad load-test worker worker-local train-ranking
 
 MIGRATIONS_DIR := packages/db/migrations
 PG_USER        := postgres
@@ -18,6 +18,7 @@ help:
 	@echo "  make load-test        Run Locust against SIGMA_LOADTEST_BASE_URL"
 	@echo "  make worker           Start the live trading worker in Docker (uses --profile worker)"
 	@echo "  make worker-local     Run the worker directly against local Postgres+Redis"
+	@echo "  make train-ranking    Fetch Coinbase history and fit the crypto RankingModel"
 
 dev:
 	docker compose up -d
@@ -70,4 +71,7 @@ worker:
 
 worker-local:
 	cd apps/api && PYTHONPATH=. python -m worker.main
+
+train-ranking:
+	cd apps/api && PYTHONPATH=. python scripts/train_ranking.py $(ARGS)
 

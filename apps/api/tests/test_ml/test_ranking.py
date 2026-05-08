@@ -85,3 +85,51 @@ def test_ranking_model_threshold_buckets(monkeypatch):
     model.fit_from_ohlcv(df)
     result = model.predict(df)
     assert result.signal == "HOLD"
+
+
+def test_fit_from_ohlcv_multi_symbol_uses_shared_scaler():
+    """Regression test for the multi-symbol training bug: the scaler must
+    be fit on all symbols' features combined, not refit per symbol."""
+    import numpy as np
+    df_a = _synthetic_ohlcv(200, trend=0.0008)
+    df_b = _synthetic_ohlcv(200, trend=-0.0003)
+
+    model = RankingModel()
+    model.fit_from_ohlcv([df_a, df_b])
+
+    assert model.sequence_builder._fitted
+    assert model._trained
+    # Predicting on either source should produce a valid SignalResult.
+    r_a = model.predict(df_a)
+    r_b = model.predict(df_b)
+    assert r_a.signal in ("BUY", "SELL", "HOLD")
+    assert r_b.signal in ("BUY", "SELL", "HOLD")
+
+    # The scaler's mean should reflect both distributions, not just the last
+    # one trained on. With per-symbol refitting the bug, the scaler.mean_
+    # would equal df_b's column means exactly.
+    from ml.sequences import FEATURE_COLUMNS, FeatureEngineer
+    fe = FeatureEngineer()
+    feats_b = fe.compute(df_b).dropna(subset=FEATURE_COLUMNS)
+    b_mean = np.asarray(feats_b[FEATURE_COLUMNS].mean().values, dtype=np.float64)
+    s_mean = np.asarray(model.sequence_builder.scaler.mean_, dtype=np.float64)
+    # Some columns will inevitably be close, but at least one feature mean
+    # should differ materially from df_b alone (proving the scaler saw both).
+    assert np.linalg.norm(s_mean - b_mean) > 1e-6
+
+
+def test_fit_from_ohlcv_skips_short_frames():
+    """Short frames (less than ranking_window bars) should be silently dropped."""
+    short = _synthetic_ohlcv(10)
+    long = _synthetic_ohlcv(200)
+
+    model = RankingModel()
+    model.fit_from_ohlcv([short, long])
+    assert model._trained
+
+
+def test_fit_from_ohlcv_handles_empty_input():
+    """No frames -> early return, no exception."""
+    model = RankingModel()
+    model.fit_from_ohlcv([])
+    assert not model._trained

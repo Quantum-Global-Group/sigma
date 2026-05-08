@@ -92,17 +92,59 @@ class RankingModel(BaseSignalModel):
     # ---- training ----------------------------------------------------------
 
     def fit_from_ohlcv(self, ohlcv: pd.DataFrame | Iterable[pd.DataFrame]) -> None:
-        """Fit on one DataFrame (single symbol) or many (concatenated by symbol)."""
+        """Fit on one DataFrame (single symbol) or many (multi-symbol).
+
+        Multi-symbol training is symbol-aware:
+          * Features are computed per symbol (so labels and sequences never
+            straddle symbol boundaries).
+          * The scaler is fit ONCE on the concatenated feature matrix so all
+            sequences share a common scaling — fixes the bug where the old
+            implementation refit the scaler per symbol and only the last
+            symbol's distribution survived.
+          * Sequences are then built per symbol using the already-fit scaler
+            in transform-only mode."""
         if isinstance(ohlcv, pd.DataFrame):
             ohlcv = [ohlcv]
-        all_seqs: list[Sequence] = []
+        ohlcv = list(ohlcv)
+        if not ohlcv:
+            return
+
+        horizon = int(settings.pred_horizon_bars)
+        window = self.sequence_builder.window
+
+        # Pass 1 — per-symbol features + labels.
+        labeled: list[pd.DataFrame] = []
         for df in ohlcv:
             feats = self.feature_engineer.compute(df)
-            seqs = self.sequence_builder.fit_transform(
-                feats,
-                horizon=int(settings.pred_horizon_bars),
-            )
-            all_seqs.extend(seqs)
+            feats = feats.dropna(subset=FEATURE_COLUMNS + ["c"]).copy()
+            feats["y"] = feats["c"].pct_change(horizon).shift(-horizon)
+            feats = feats.dropna(subset=["y"])
+            if len(feats) < window:
+                continue
+            labeled.append(feats)
+        if not labeled:
+            return
+
+        # Fit the scaler once on all features.
+        all_X = np.vstack([f[FEATURE_COLUMNS].values.astype(np.float32) for f in labeled])
+        self.sequence_builder.scaler.fit(all_X)
+        self.sequence_builder._fitted = True
+
+        # Pass 2 — build sequences per symbol using the shared scaler.
+        all_seqs: list[Sequence] = []
+        for feats in labeled:
+            X_full = feats[FEATURE_COLUMNS].values.astype(np.float32)
+            X_scaled = self.sequence_builder.scaler.transform(X_full)
+            for i in range(window, len(feats)):
+                Xw = X_scaled[i - window : i, :]
+                y = float(feats.iloc[i]["y"])
+                meta = {
+                    "symbol": feats.iloc[i].get("symbol", ""),
+                    "window": window,
+                    "t": feats.iloc[i].get("t"),
+                }
+                all_seqs.append(Sequence(X=Xw, y=y, meta=meta))
+
         self.fit(all_seqs)
 
     def fit(self, sequences: list[Sequence]) -> None:

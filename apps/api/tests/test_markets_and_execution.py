@@ -59,8 +59,47 @@ def test_paper_executor_fills_at_reference():
 
 def test_paper_executor_requires_reference_px():
     order = OrderRequest(asset_class="crypto", symbol="BTC-USD", side="buy", qty=0.1)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ValueError, match="reference price"):
         asyncio.run(PaperExecutor().place(order))
+
+
+def test_paper_executor_zero_qty_returns_zero_fill():
+    order = OrderRequest(asset_class="crypto", symbol="BTC-USD", side="buy", qty=0.0, limit_px=100.0)
+    fill = asyncio.run(PaperExecutor().place(order))
+    assert fill.qty == 0.0
+    assert fill.fee == 0.0
+
+
+def test_paper_executor_smallcap_uses_higher_slippage(monkeypatch):
+    """Sub-$2 ref price should trigger smallcap_slippage_bps."""
+    from config import settings as cfg
+    monkeypatch.setattr(cfg, "smallcap_price_threshold_usd", 2.0)
+    monkeypatch.setattr(cfg, "smallcap_slippage_bps", 100)
+    monkeypatch.setattr(cfg, "base_slippage_bps", 5)
+
+    order = OrderRequest(asset_class="crypto", symbol="PEPE-USD", side="buy", qty=10.0, limit_px=0.01)
+    fill = asyncio.run(PaperExecutor().place(order))
+    # smallcap path → 100 bps base; small order (notional < $1k) → ×0.5 → 50 bps
+    assert fill.slippage_bps == 50.0
+
+
+def test_paper_executor_sell_executes_below_ref():
+    order = OrderRequest(asset_class="crypto", symbol="BTC-USD", side="sell", qty=0.1, limit_px=100.0)
+    fill = asyncio.run(PaperExecutor().place(order))
+    assert fill.px < 100.0
+    assert fill.qty == 0.1
+
+
+def test_coinbase_executor_requires_credentials(monkeypatch):
+    from config import settings as cfg
+    monkeypatch.setattr(cfg, "coinbase_api_key_name", "")
+    monkeypatch.setattr(cfg, "coinbase_private_key", "")
+    monkeypatch.setattr(cfg, "coinbase_api_key", "")
+    monkeypatch.setattr(cfg, "coinbase_api_secret", "")
+
+    from execution.coinbase import CoinbaseExecutor
+    with pytest.raises(ValueError, match="Coinbase credentials missing"):
+        CoinbaseExecutor()
 
 
 def test_get_executor_default_paper(monkeypatch):

@@ -51,11 +51,28 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "mistral:7b-instruct"
 
-    # Execution
+    # Execution — Coinbase Advanced Trade
     executor_mode: str = "paper"  # paper | coinbase
     coinbase_api_key_name: str = ""
     coinbase_private_key: str = ""
     coinbase_sandbox: bool = True
+    coinbase_order_timeout_seconds: int = 30
+    # Legacy Coinbase format (pre-Advanced-Trade) — kept for back-compat with
+    # razorBill deployments still using HMAC keys.
+    coinbase_api_key: str = ""
+    coinbase_api_secret: str = ""
+    coinbase_api_passphrase: str = ""
+
+    # Execution — fees, slippage, latency, fills
+    maker_fee_bps: int = 4
+    taker_fee_bps: int = 6
+    base_slippage_bps: int = 5
+    smallcap_slippage_bps: int = 50
+    smallcap_price_threshold_usd: float = 2.0
+    order_latency_ms: int = 0
+    order_latency_jitter_min_ms: int = 0
+    order_latency_jitter_max_ms: int = 0
+    partial_fill_pct: float = 1.0  # 0 < partial_fill_pct <= 1.0
 
     # Worker live-loop cadence (seconds). Per-asset-class override via env.
     worker_tick_seconds_crypto: int = 300

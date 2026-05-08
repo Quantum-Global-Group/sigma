@@ -59,12 +59,14 @@ class Settings(BaseSettings):
     internal_secret: str = ""
     system_user_id: str = "00000000-0000-0000-0000-000000000001"
 
-    # Sentiment provider selection: finbert | langextract | ollama | hybrid | none
+    # Sentiment provider selection: finbert | langextract | hybrid | none
     sentiment_provider: str = "finbert"
+    sentiment_min_docs: int = 3
+    # LangExtract (uses the `langextract` Python package, optionally pointed at
+    # a local Ollama server via lx_model_url). razorBill convention.
+    lx_model_id: str = "mistral:7b-instruct"
+    lx_model_url: str = "http://127.0.0.1:11434"
     langextract_api_key: str = ""
-    langextract_api_url: str = ""
-    ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "mistral:7b-instruct"
 
     # Execution — Coinbase Advanced Trade
     executor_mode: str = "paper"  # paper | coinbase

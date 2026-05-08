@@ -1,8 +1,15 @@
 """Sentiment providers — pluggable behind a single `score_headlines` API.
 
-Selected by `settings.sentiment_provider` (finbert | langextract | ollama |
-hybrid | none). Existing call sites (`from ml.sentiment import score_headlines`)
-continue to work unchanged."""
+Selected by `settings.sentiment_provider`:
+  finbert     - HuggingFace ProsusAI/finbert (razorBill canonical)
+  langextract - razorBill canonical, uses the `langextract` package against
+                a local Ollama or a hosted endpoint (lx_model_url)
+  ollama      - direct Ollama HTTP (sigma extension, doesn't need langextract)
+  hybrid      - average of finbert + langextract + ollama (any that load)
+  none        - neutral
+
+Existing call sites (`from ml.sentiment import score_headlines`) continue
+to work unchanged."""
 
 from __future__ import annotations
 

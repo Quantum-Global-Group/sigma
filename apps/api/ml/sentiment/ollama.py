@@ -1,8 +1,10 @@
-"""Ollama-backed sentiment — local mistral:7b-instruct (or configured model).
+"""Ollama-direct sentiment — convenience provider that talks to Ollama's
+`/api/generate` endpoint without going through langextract.
 
-Ported from razorBill `nlp.py` Ollama branch. Uses the simple `/api/generate`
-endpoint with a deterministic prompt; the model returns a number in [-1, 1]
-which we parse out."""
+razorBill itself drives Ollama via the `langextract` Python package
+(see `langextract.py`). This is a sigma-side extension for users who want
+Ollama-only without installing langextract. Uses `lx_model_url` and
+`lx_model_id` for backward compatibility with razorBill env vars."""
 
 from __future__ import annotations
 
@@ -27,8 +29,8 @@ class OllamaProvider(SentimentProvider):
     name = "ollama"
 
     def __init__(self) -> None:
-        self._url = settings.ollama_url.rstrip("/") + "/api/generate"
-        self._model = settings.ollama_model
+        self._url = settings.lx_model_url.rstrip("/") + "/api/generate"
+        self._model = settings.lx_model_id
 
     def _score_one(self, headline: str) -> float:
         try:

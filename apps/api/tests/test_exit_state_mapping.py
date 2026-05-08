@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
-WORKER_PATH = Path(__file__).resolve().parents[3] / "worker"
-sys.path.insert(0, str(WORKER_PATH.parent))
+APPS_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(APPS_DIR))
 
 
 def test_to_dict_with_no_row_uses_seed():

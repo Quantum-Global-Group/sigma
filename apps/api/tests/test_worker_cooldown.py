@@ -4,8 +4,8 @@ from datetime import datetime, timedelta, timezone
 import sys
 from pathlib import Path
 
-WORKER_PATH = Path(__file__).resolve().parents[3] / "worker"
-sys.path.insert(0, str(WORKER_PATH.parent))
+APPS_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(APPS_DIR))
 
 
 def test_in_cooldown_true_when_recent_sell(monkeypatch):

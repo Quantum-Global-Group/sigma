@@ -9,8 +9,10 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # The worker package lives at apps/worker (sibling to apps/api).
-WORKER_PATH = Path(__file__).resolve().parents[3] / "worker"
-sys.path.insert(0, str(WORKER_PATH.parent))
+# parents[0]=tests, [1]=api, [2]=apps. Add apps/ to sys.path so `worker.tick`
+# resolves to apps/worker/tick.py.
+APPS_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(APPS_DIR))
 
 
 def test_tick_skips_when_market_closed():

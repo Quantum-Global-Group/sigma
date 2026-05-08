@@ -44,7 +44,7 @@ class TestDisabled:
     def test_pipeline_runs_with_noop_spans(self):
         with patch.object(langfuse_tracing.settings, "langfuse_public_key", ""), \
              patch.object(langfuse_tracing.settings, "langfuse_secret_key", ""), \
-             patch("ml.pipeline.fetch_ohlcv", return_value=_make_ohlcv()):
+             patch("markets.equity.EquityAdapter.fetch_ohlcv", return_value=_make_ohlcv()):
             result = run_signal_pipeline("AAPL", "daily")
         assert result.signal in ("BUY", "SELL", "HOLD")
 
@@ -71,7 +71,7 @@ class TestEnabled:
              patch.object(langfuse_tracing.settings, "langfuse_secret_key", "sk_test"), \
              patch.object(langfuse_tracing, "_client", client), \
              patch.object(langfuse_tracing, "_init_attempted", True), \
-             patch("ml.pipeline.fetch_ohlcv", return_value=_make_ohlcv()):
+             patch("markets.equity.EquityAdapter.fetch_ohlcv", return_value=_make_ohlcv()):
             result = run_signal_pipeline("AAPL", "daily")
 
         assert result.signal in ("BUY", "SELL", "HOLD")
@@ -101,7 +101,7 @@ class TestEnabled:
              patch.object(langfuse_tracing.settings, "langfuse_secret_key", "sk_test"), \
              patch.object(langfuse_tracing, "_client", client), \
              patch.object(langfuse_tracing, "_init_attempted", True), \
-             patch("ml.pipeline.fetch_ohlcv", side_effect=ValueError("bad ticker")):
+             patch("markets.equity.EquityAdapter.fetch_ohlcv", side_effect=ValueError("bad ticker")):
             try:
                 run_signal_pipeline("XXXX", "daily")
             except ValueError:

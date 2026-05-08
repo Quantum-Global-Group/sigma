@@ -74,6 +74,9 @@ class RankingModel(BaseSignalModel):
                 random_state=42,
             )
         if backend == "xgb":
+            # XGBoost 2.0+ moved early_stopping_rounds from fit() to the
+            # constructor. Set it here so fit() can stay simple and version-
+            # tolerant. eval_set still has to be passed at fit() time.
             return xgb.XGBRegressor(
                 n_estimators=int(settings.xgb_n_estimators),
                 learning_rate=float(settings.xgb_learning_rate),
@@ -85,6 +88,7 @@ class RankingModel(BaseSignalModel):
                 random_state=42,
                 tree_method="hist",
                 n_jobs=0,
+                early_stopping_rounds=50,
             )
         from sklearn.linear_model import SGDRegressor
         return SGDRegressor(max_iter=1000, tol=1e-3)
@@ -164,12 +168,10 @@ class RankingModel(BaseSignalModel):
                     callbacks=[lgb.early_stopping(50, verbose=False)],
                 )
             else:
-                self.model.fit(
-                    X_tr, y_tr,
-                    eval_set=[(X_val, y_val)],
-                    early_stopping_rounds=50,
-                    verbose=False,
-                )
+                # XGB: early_stopping_rounds is set on the constructor;
+                # eval_set here triggers it. verbose kwarg name varies
+                # across XGBoost versions, so omit it.
+                self.model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)])
         else:
             self.model.fit(X, y)
 

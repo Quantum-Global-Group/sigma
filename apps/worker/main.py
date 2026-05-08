@@ -30,39 +30,17 @@ logger = logging.getLogger("worker")
 
 
 async def tick_once(asset_class: str) -> None:
-    """One pass over the configured universe for `asset_class`."""
-    from markets import get_market_adapter
-    from universe import get_universe_selector
-    from ml.pipeline import run_signal_pipeline
+    """One pass over the configured universe for `asset_class`.
 
-    adapter = get_market_adapter(asset_class)
-    if not adapter.is_market_open():
-        logger.info("[%s] market closed — skipping tick", asset_class)
-        return
+    Real implementation lives in worker.tick — this thin wrapper offloads
+    sync market-data fetches off the asyncio event loop and isolates
+    exception handling to the per-tick boundary."""
+    from worker.tick import tick_once as _tick
 
-    selector = get_universe_selector(asset_class)
-    symbols = selector.select()
-    logger.info("[%s] tick: %d symbols", asset_class, len(symbols))
-
-    for symbol in symbols:
-        try:
-            # Pipeline currently runs sync; offload so a slow fetch doesn't
-            # block the event loop for the whole universe.
-            result = await asyncio.to_thread(
-                run_signal_pipeline, symbol, _default_timeframe(asset_class), asset_class=asset_class
-            )
-            logger.info(
-                "[%s] %s -> %s (conf=%.2f, ret=%+.4f)",
-                asset_class, symbol, result.signal, result.confidence, result.predicted_return,
-            )
-            # TODO(razorBill port): pass result through strategy combiner +
-            # risk manager + sizing + execution, then persist orders/positions.
-        except Exception:
-            logger.exception("[%s] tick failed for %s", asset_class, symbol)
-
-
-def _default_timeframe(asset_class: str) -> str:
-    return "5m" if asset_class == "crypto" else "daily"
+    try:
+        await _tick(asset_class)
+    except Exception:
+        logger.exception("[%s] tick raised", asset_class)
 
 
 def _interval_for(asset_class: str) -> int:

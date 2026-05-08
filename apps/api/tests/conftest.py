@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from db.connection import get_db
 from main import app
-from middleware.auth import require_api_key
+from middleware.auth import AuthContext, require_api_key, require_auth
 from middleware.rate_limit import check_rate_limit
 
 # ─── Test API key ────────────────────────────────────────────────────────────
@@ -61,10 +61,14 @@ def client():
     async def _fake_auth():
         return MOCK_AUTH
 
+    async def _fake_auth_ctx():
+        return AuthContext(api_key=_FakeAPIKey(), user=_FakeUser(), internal=False)
+
     async def _fake_rate_limit(*args, **kwargs):
         return None
 
     app.dependency_overrides[require_api_key] = _fake_auth
+    app.dependency_overrides[require_auth] = _fake_auth_ctx
     app.dependency_overrides[check_rate_limit] = _fake_rate_limit
     app.dependency_overrides[get_db] = _fake_db
 

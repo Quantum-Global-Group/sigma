@@ -25,6 +25,12 @@ async def get_user_by_id(db: AsyncSession, user_id) -> User | None:
     return result.scalar_one_or_none()
 
 
+async def get_user_by_id_str(db: AsyncSession, user_id: str) -> User | None:
+    """Like get_user_by_id but accepts a UUID string (used by the worker auth
+    bypass which reads settings.system_user_id as a string)."""
+    return await get_user_by_id(db, uuid.UUID(user_id))
+
+
 # ─── API key CRUD ────────────────────────────────────────────────────────────
 
 async def list_keys_for_user(db: AsyncSession, user_id: uuid.UUID) -> list[APIKey]:

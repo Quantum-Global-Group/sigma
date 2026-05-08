@@ -236,6 +236,9 @@ make clean      # Stop Docker and remove volumes
 
 ## Deployment
 
+For the full production deploy, webhook setup, migrations, load testing, and
+launch checklist, see [DEPLOY.md](./DEPLOY.md). Quick commands below.
+
 ### Backend (Railway)
 
 ```bash
@@ -270,6 +273,24 @@ Set env vars in the Vercel dashboard under Project → Settings → Environment 
 
 ```bash
 stripe listen --forward-to localhost:3000/api/webhooks/stripe
+```
+
+### Load testing
+
+Locust file at [tests/load_test.py](./tests/load_test.py). Point it at staging:
+
+```bash
+pip install locust
+SIGMA_LOADTEST_BASE_URL=https://staging-api.sigma.dev \
+SIGMA_LOADTEST_API_KEY=sk_test_... \
+make load-test
+```
+
+### Gumroad bundles
+
+```bash
+make package-gumroad
+# outputs: dist/gumroad/dashboard-template.zip and ml-boilerplate.zip
 ```
 
 ---

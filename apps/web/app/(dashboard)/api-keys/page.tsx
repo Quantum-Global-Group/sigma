@@ -27,7 +27,7 @@ export default function APIKeysPage() {
       const data = await fetchKeys(apiKey);
       setKeys(data);
       setLoaded(true);
-    } catch (e) {
+    } catch {
       setError("Failed to load keys. Make sure your API key is valid.");
     }
   }
@@ -45,7 +45,7 @@ export default function APIKeysPage() {
       setNewKey(created);
       setNewKeyName("");
       await loadKeys(activeKey);
-    } catch (e) {
+    } catch {
       setError("Failed to create key.");
     } finally {
       setLoading(false);
@@ -58,7 +58,7 @@ export default function APIKeysPage() {
     try {
       await revokeKey(activeKey, keyId);
       setKeys((prev) => prev.filter((k) => k.id !== keyId));
-    } catch (e) {
+    } catch {
       setError("Failed to revoke key.");
     } finally {
       setLoading(false);

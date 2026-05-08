@@ -1,0 +1,37 @@
+# Rate Limits
+
+SIGMA enforces rate limits with a sliding window in Redis. Limits are applied per API key, not per IP.
+
+## Per-plan budgets
+
+| Plan | Calls / day | Burst (per minute) |
+|------|-------------|--------------------|
+| Free | 100 | 10 |
+| Pro | 10,000 | 200 |
+| Enterprise | Unlimited | 2,000 |
+
+`Unlimited` is implemented as a very high ceiling — contact us if you expect more than 1M calls/day.
+
+## Response headers
+
+Every response includes:
+
+```http
+X-RateLimit-Limit: 10000
+X-RateLimit-Remaining: 9847
+X-RateLimit-Reset: 1735689600
+```
+
+`X-RateLimit-Reset` is a Unix timestamp at which the daily window rolls over.
+
+## When you hit a limit
+
+- HTTP `429` with `{ "detail": "Rate limit exceeded", "code": "RATE_LIMIT_EXCEEDED" }`.
+- The burst limit refreshes after one minute; the daily limit resets at the start of your billing period.
+- Cached signal responses (`cached: true`) do not count against either limit.
+
+## Reducing your call volume
+
+- Cache signals locally for the timeframe you requested (daily signals are stable for the trading day).
+- Use [`POST /portfolio/rebalance`](/docs/endpoints) instead of looping per-ticker signals when you really want allocations.
+- Schedule background jobs to back off on `429` with exponential delay (start at 2s).

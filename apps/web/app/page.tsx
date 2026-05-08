@@ -1,31 +1,13 @@
 import Link from "next/link";
+import { MarketingNav } from "@/components/marketing/MarketingNav";
+import { FeatureGrid } from "@/components/marketing/FeatureGrid";
+import { GumroadStrip } from "@/components/marketing/GumroadStrip";
+import { Footer } from "@/components/layout/Footer";
 
 export default function LandingPage() {
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-950 to-gray-900 text-white">
-      <nav className="flex items-center justify-between px-8 py-6 border-b border-white/10">
-        <span className="text-xl font-bold tracking-tight">SIGMA</span>
-        <div className="flex items-center gap-6 text-sm">
-          <Link href="/pricing" className="text-gray-400 hover:text-white transition-colors">
-            Pricing
-          </Link>
-          <Link href="/docs" className="text-gray-400 hover:text-white transition-colors">
-            Docs
-          </Link>
-          <Link
-            href="/sign-in"
-            className="px-4 py-2 rounded-md bg-white/10 hover:bg-white/20 transition-colors"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/sign-up"
-            className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 transition-colors font-medium"
-          >
-            Get started
-          </Link>
-        </div>
-      </nav>
+    <div className="min-h-screen bg-gradient-to-br from-gray-950 to-gray-900 text-white flex flex-col">
+      <MarketingNav />
 
       <section className="flex flex-col items-center text-center px-8 py-32 max-w-4xl mx-auto">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-sm mb-8 border border-indigo-500/30">
@@ -61,7 +43,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="max-w-4xl mx-auto px-8 pb-20">
+      <section className="max-w-4xl mx-auto px-8 pb-20 w-full">
         <div className="rounded-xl border border-white/10 bg-white/5 p-8 font-mono text-sm">
           <p className="text-gray-500 mb-4"># Generate a signal with one API call</p>
           <p className="text-green-400">
@@ -83,6 +65,10 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
-    </main>
+
+      <FeatureGrid />
+      <GumroadStrip />
+      <Footer />
+    </div>
   );
 }

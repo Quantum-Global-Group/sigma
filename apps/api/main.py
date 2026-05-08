@@ -32,6 +32,10 @@ async def lifespan(app: FastAPI):
     if _pool is not None:
         await _pool.aclose()
 
+    from ml.langfuse_tracing import flush as _flush_langfuse, is_enabled as _langfuse_enabled
+    if _langfuse_enabled():
+        _flush_langfuse()
+
 
 def create_app() -> FastAPI:
     app = FastAPI(

@@ -1,0 +1,87 @@
+# Examples
+
+Copy-paste recipes for the most common SIGMA workflows.
+
+## curl: get one signal
+
+```bash
+curl -X POST https://api.sigma.dev/signals \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"ticker": "AAPL", "timeframe": "daily"}'
+```
+
+## Python: rebalance a portfolio
+
+```python
+import os
+import httpx
+
+API_KEY = os.environ["SIGMA_API_KEY"]
+BASE = "https://api.sigma.dev"
+
+resp = httpx.post(
+    f"{BASE}/portfolio/rebalance",
+    headers={"Authorization": f"Bearer {API_KEY}"},
+    json={
+        "holdings": {"AAPL": 10000, "MSFT": 8000, "GOOGL": 5000},
+        "method": "mvo",
+    },
+    timeout=10.0,
+)
+resp.raise_for_status()
+plan = resp.json()
+for trade in plan["recommended_trades"]:
+    print(trade["ticker"], trade["action"], trade["usd_amount"])
+```
+
+## TypeScript: stream signals into a UI
+
+```ts
+async function getSignal(ticker: string) {
+  const res = await fetch("https://api.sigma.dev/signals", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.SIGMA_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ ticker, timeframe: "daily" }),
+  });
+  if (!res.ok) throw new Error(`Sigma ${res.status}`);
+  return res.json();
+}
+```
+
+## Backtest a strategy
+
+```bash
+curl -X POST https://api.sigma.dev/backtest/run \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tickers": ["SPY"],
+    "start_date": "2020-01-01",
+    "end_date": "2024-12-31",
+    "initial_capital": 100000,
+    "rebalance_freq": "monthly"
+  }'
+```
+
+## Handling rate limits
+
+```python
+import time
+import httpx
+
+def call_with_backoff(client, url, **kwargs):
+    delay = 2
+    for _ in range(5):
+        r = client.post(url, **kwargs)
+        if r.status_code != 429:
+            return r
+        time.sleep(delay)
+        delay *= 2
+    r.raise_for_status()
+```
+
+See [Rate Limits](/docs/rate-limits) for budgets and headers.

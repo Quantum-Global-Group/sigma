@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     worker_tick_seconds_crypto: int = 300
     worker_tick_seconds_equity: int = 900
 
+    # Strategy combiner (razorBill multi-strategy)
+    enabled_strategies: str = "momentum,mean_reversion,breakout,regime,ml"
+    strategy_weights: str = "0.2,0.2,0.2,0.2,0.2"
+    min_signal_confidence: float = 0.3
+
     # RankingModel (razorBill-derived crypto regressor)
     ranking_window: int = 30                # bars per training/inference sequence
     pred_horizon_bars: int = 3              # forward return horizon for label

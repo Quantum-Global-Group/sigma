@@ -1,0 +1,29 @@
+# Build context exclusions for both apps/api and apps/worker images.
+# Without these, the worker build pulls in 1.5GB+ from apps/api/.venv
+# (symlinks to /usr/bin/python3 which docker buildkit rejects).
+
+**/.venv/
+**/venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# Web build artifacts that don't belong in api/worker images
+apps/web/node_modules/
+apps/web/.next/
+apps/web/out/
+
+# Local ad-hoc files
+docker-compose.override.yml
+.env
+.env.local
+.git/
+.github/
+_legacy_razorbill/
+
+# Saved models — bundle separately when training pipeline matures
+apps/api/ml/saved_models/*.pkl
+apps/api/ml/saved_models/*.pt

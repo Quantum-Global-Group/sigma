@@ -6,6 +6,8 @@ Working doc for what's coming next. Single-source-of-truth for milestones, sprin
 
 **Next milestone:** Internal alpha — running the merged sigma+razorBill stack for myself in paper mode. No customer surface yet.
 
+> **Companion doc:** [`/06_ROADMAP.md`](../06_ROADMAP.md) at the repo root holds the granular, day-by-day checklist with explicit done-when criteria. Use that for Sprint 1's detailed task list; use this doc for milestone strategy and the long backlog.
+
 ---
 
 ## Milestones

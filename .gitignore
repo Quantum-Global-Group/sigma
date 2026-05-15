@@ -40,6 +40,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Cursor auto-regenerated state (per-session, no signal for review)
+.cursor/hooks/state/
+
 # Local-only docker-compose port overrides (added during PR #1 verification)
 docker-compose.override.yml
 

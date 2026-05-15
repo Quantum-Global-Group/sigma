@@ -1,3 +1,17 @@
+import type {
+  APIKeyItem,
+  AssetClass,
+  BacktestRequest,
+  BacktestResult,
+  CreateKeyResponse,
+  ExecutionStatus,
+  Order,
+  Position,
+  RebalanceResponse,
+  SignalResponse,
+  UsageSummary,
+} from "@sigma/types";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 async function apiFetch<T>(
@@ -23,16 +37,7 @@ async function apiFetch<T>(
 
 // ─── Signals ─────────────────────────────────────────────────────────────────
 
-export type SignalResponse = {
-  ticker: string;
-  timeframe: string;
-  signal: "BUY" | "SELL" | "HOLD";
-  confidence: number;
-  predicted_return: number;
-  model_version: string;
-  cached: boolean;
-  timestamp: string;
-};
+export type { SignalResponse } from "@sigma/types";
 
 export async function fetchSignal(
   ticker: string,
@@ -47,17 +52,7 @@ export async function fetchSignal(
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 
-export type APIKeyItem = {
-  id: string;
-  key_prefix: string;
-  name: string | null;
-  created_at: string;
-  last_used_at: string | null;
-  expires_at: string | null;
-  revoked: boolean;
-};
-
-export type CreateKeyResponse = APIKeyItem & { raw_key: string };
+export type { APIKeyItem, CreateKeyResponse } from "@sigma/types";
 
 export async function fetchKeys(apiKey: string): Promise<APIKeyItem[]> {
   return apiFetch<APIKeyItem[]>("/keys", apiKey);
@@ -76,15 +71,7 @@ export async function revokeKey(apiKey: string, keyId: string): Promise<void> {
 
 // ─── Usage ───────────────────────────────────────────────────────────────────
 
-export type UsageSummary = {
-  user_id: string;
-  plan: string;
-  period_start: string;
-  period_end: string;
-  api_calls: number;
-  limit: number;
-  remaining: number;
-};
+export type { UsageSummary } from "@sigma/types";
 
 export async function fetchUsage(apiKey: string): Promise<UsageSummary> {
   return apiFetch<UsageSummary>("/usage", apiKey);
@@ -92,20 +79,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageSummary> {
 
 // ─── Portfolio ───────────────────────────────────────────────────────────────
 
-export type TradeRecommendation = {
-  ticker: string;
-  action: "BUY" | "SELL";
-  amount: number;
-};
-
-export type RebalanceResponse = {
-  method: string;
-  fallback: boolean;
-  target_allocation: Record<string, number>;
-  recommended_trades: TradeRecommendation[];
-  sharpe_ratio: number | null;
-  timestamp: string;
-};
+export type { TradeRecommendation, RebalanceResponse } from "@sigma/types";
 
 export async function fetchRebalance(
   holdings: Record<string, number>,
@@ -121,28 +95,7 @@ export async function fetchRebalance(
 
 // ─── Backtest ────────────────────────────────────────────────────────────────
 
-export type BacktestRequest = {
-  tickers: string[];
-  start_date: string;
-  end_date: string;
-  initial_capital?: number;
-  rebalance_freq?: "daily" | "weekly" | "monthly";
-};
-
-export type BacktestResult = {
-  tickers: string[];
-  start_date: string;
-  end_date: string;
-  initial_capital: number;
-  final_value: number;
-  total_return: number;
-  annualized_return: number;
-  sharpe_ratio: number;
-  max_drawdown: number;
-  equity_curve: { date: string; value: number }[];
-  trade_log: { date: string; ticker: string; action: string; weight: number }[];
-  timestamp: string;
-};
+export type { BacktestRequest, BacktestResult } from "@sigma/types";
 
 export async function fetchBacktest(req: BacktestRequest, apiKey: string): Promise<BacktestResult> {
   return apiFetch<BacktestResult>("/backtest/run", apiKey, {
@@ -167,43 +120,7 @@ export async function fetchSignalHistory(
 
 // ─── Trading: positions, orders, execution ───────────────────────────────────
 
-export type AssetClass = "equity" | "crypto";
-
-export type Position = {
-  id: string;
-  asset_class: AssetClass;
-  symbol: string;
-  qty: number;
-  entry_px: number;
-  entry_ts: string;
-  current_px: number | null;
-  unrealized_pnl: number | null;
-  realized_pnl: number;
-  closed: boolean;
-  closed_at: string | null;
-};
-
-export type Order = {
-  id: string;
-  asset_class: AssetClass;
-  symbol: string;
-  ts: string;
-  side: "buy" | "sell";
-  qty: number;
-  px: number;
-  fee: number;
-  slippage_bps: number | null;
-  executor: string;
-  external_id: string | null;
-  status: string;
-};
-
-export type ExecutionStatus = {
-  executor_mode: string;
-  coinbase_sandbox: boolean;
-  worker_asset_classes_default_crypto_seconds: number;
-  worker_asset_classes_default_equity_seconds: number;
-};
+export type { AssetClass, Position, Order, ExecutionStatus } from "@sigma/types";
 
 export async function fetchPositions(
   apiKey: string,

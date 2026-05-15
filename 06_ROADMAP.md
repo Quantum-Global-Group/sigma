@@ -2,6 +2,8 @@
 
 > Concrete daily tasks. Each item has a clear done condition.
 > No task ships without its test passing.
+>
+> **Companion doc:** [`docs/ROADMAP.md`](docs/ROADMAP.md) holds the milestone-level strategic view (M1 alpha → M2 beta → M3 production), the sprint goals, and the long backlog. Use it when planning beyond Sprint 1.
 
 ---
 
@@ -198,6 +200,8 @@
 
 ### Day 16-17 — Docs + Marketing Site
 
+- [x] `packages/types/` — shared API DTO TypeScript types (barrel `@sigma/types`, consumed by `apps/web/lib/api.ts`)
+- [x] `.github/workflows/ci.yml` — `pytest` + `npm run type-check` on push/PR
 - [x] `app/(marketing)/docs/page.tsx` — docs landing
 - [x] `app/(marketing)/docs/[slug]/page.tsx` — MDX-rendered doc pages
 - [x] Write docs: Quick Start, Authentication, Endpoints, Rate Limits, Examples

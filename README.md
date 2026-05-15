@@ -1,8 +1,10 @@
 # SIGMA
 
-**ML-powered trading signal API with quantum-hybrid portfolio optimization.**
+[![CI](https://github.com/Quantum-Global-Group/sigma/actions/workflows/ci.yml/badge.svg)](https://github.com/Quantum-Global-Group/sigma/actions/workflows/ci.yml)
 
-SIGMA is an API-first platform that generates institutional-grade trading signals using ensemble ML models and quantum-inspired portfolio optimization — served as a REST API with usage-based billing, a real-time dashboard, and a digital product storefront.
+**ML-powered trading signal API with quantum-hybrid portfolio optimization, multi-asset coverage (equities + crypto), and a live paper-trading worker.**
+
+SIGMA is an API-first platform that generates institutional-grade trading signals using ensemble ML models and quantum-inspired portfolio optimization — served as a REST API with usage-based billing, a real-time dashboard, and a digital product storefront. A separate worker service runs the merged razorBill strategy stack against the house book in paper mode (Coinbase sandbox / live for crypto, Alpaca on the equity backlog).
 
 Built for engineers. No sales calls. No minimums. Pay per call.
 
@@ -12,11 +14,13 @@ Built for engineers. No sales calls. No minimums. Pay per call.
 
 | Capability | How |
 |---|---|
-| Trading signals | ML ensemble (LSTM + Random Forest + XGBoost) trained on OHLCV + 130 technical indicators |
-| Sentiment overlay | FinBERT fine-tuned on financial news and Twitter |
+| Trading signals (equity + crypto) | ML ensemble (LSTM + Random Forest + XGBoost) for equities; razorBill RankingModel (LightGBM / XGBoost / SGD) for crypto. Both behind a single `MarketAdapter` abstraction. |
+| Live worker loop | Long-running `apps/worker/` service: per-tick fetch → features → multi-strategy combiner → risk + sizing → executor → persisted orders / positions / exit state |
+| Sentiment overlay | Pluggable providers — FinBERT, LangExtract (with local Ollama), or hybrid. Selected via `SENTIMENT_PROVIDER`. |
 | Portfolio optimization | CVXPY mean-variance + QAOA via PennyLane / Qiskit |
 | Backtesting | Vectorized strategy simulation with Sharpe, drawdown, win rate |
-| API monetization | Stripe usage-based metering — pay per call, no minimum |
+| Execution adapters | Paper (size-aware slippage, partial fills, latency jitter); Coinbase Advanced Trade (sandbox / prod toggle) |
+| API monetization | Stripe usage-based metering — pay per call, no minimum. Worker traffic uses `X-Internal-Secret` to bypass billing while still logging usage. |
 | Digital products | Code templates and trained models sold via Gumroad |
 
 ---
@@ -26,7 +30,8 @@ Built for engineers. No sales calls. No minimums. Pay per call.
 ```
 ┌──────────────────────────────────────────────┐
 │  Next.js 15  (Vercel)                        │
-│  Landing · Dashboard · Docs · API Keys       │
+│  Landing · Dashboard · Docs · Positions      │
+│  Orders · Execution · API Keys · Billing     │
 └──────────────┬───────────────────────────────┘
                │ REST
 ┌──────────────▼───────────────────────────────┐
@@ -34,18 +39,25 @@ Built for engineers. No sales calls. No minimums. Pay per call.
 │  Auth · Rate limiting · Stripe metering      │
 └──────────────┬───────────────────────────────┘
                │
-       ┌───────┴────────┐
-       │                │
-┌──────▼──────┐  ┌──────▼──────┐
-│  FastAPI    │  │  PostgreSQL │
-│  (Railway)  │  │+ TimescaleDB│
-│             │  │  + Redis    │
-│  ML · Quantum│  │  (Railway)  │
-│  Signals    │  └─────────────┘
-└─────────────┘
+       ┌───────┴──────────────────┐
+       │                          │
+┌──────▼──────┐         ┌─────────▼─────────┐
+│  FastAPI    │ ◄─────► │   apps/worker     │
+│  (Railway)  │  X-     │   (Railway)       │
+│  ML · Quantum│ Internal│   Live tick loop  │
+│  Signals    │ -Secret │   crypto + equity │
+└──────┬──────┘         └─────────┬─────────┘
+       │                          │
+       └────────┬─────────────────┘
+                │
+       ┌────────▼──────────────────┐
+       │  PostgreSQL + TimescaleDB │
+       │  Redis                    │
+       │  (Railway)                │
+       └───────────────────────────┘
 ```
 
-Two services. The API gateway (TypeScript, Vercel) handles auth and billing. The ML backend (Python, Railway) handles signal generation, portfolio optimization, and quantum circuits. Each can be deployed and scaled independently.
+Three services. The API gateway (TypeScript, Vercel) handles auth and billing. The ML backend (Python, Railway) handles signal generation, portfolio optimization, and quantum circuits. The worker (Python, Railway) runs the per-tick trading cycle and reads/writes positions, orders, and exit state through the same Postgres. Each service can be deployed and scaled independently.
 
 ---
 
@@ -55,9 +67,11 @@ Two services. The API gateway (TypeScript, Vercel) handles auth and billing. The
 
 **Backend** — FastAPI, Pydantic v2, SQLAlchemy (async)
 
-**ML** — PyTorch, scikit-learn, pandas-ta, yfinance, HuggingFace Transformers (FinBERT)
+**ML** — PyTorch, scikit-learn, LightGBM, XGBoost, pandas-ta, yfinance, HuggingFace Transformers (FinBERT)
 
 **Quantum** — Qiskit, PennyLane, CVXPY
+
+**Crypto market data + execution** — Coinbase Exchange (public candles), Coinbase Advanced Trade (live orders, sandbox + prod)
 
 **Data** — PostgreSQL 15 + TimescaleDB extension, Redis 7
 
@@ -77,7 +91,7 @@ Two services. The API gateway (TypeScript, Vercel) handles auth and billing. The
 
 ```bash
 node --version    # >= 20.x
-python --version  # >= 3.11
+python --version  # >= 3.12 (pandas-ta requires it; Dockerfile + CI use 3.12)
 docker --version  # >= 24.x
 ```
 
@@ -165,10 +179,14 @@ All endpoints require `Authorization: Bearer YOUR_API_KEY` unless noted.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Service health — no auth |
-| `POST` | `/signals` | Generate ML trading signal |
+| `POST` | `/signals` | Generate ML trading signal — accepts `asset_class: "equity" \| "crypto"` (default `equity`) |
 | `GET` | `/signals/{ticker}/history` | Historical signals for a ticker |
 | `POST` | `/portfolio/rebalance` | Optimize portfolio allocation |
 | `POST` | `/backtest/run` | Backtest a strategy on historical data |
+| `GET` | `/positions` | House-book positions (worker-managed); filter by `asset_class`, `open_only` |
+| `GET` | `/orders` | Recent fills / orders; filter by `asset_class`, `symbol` |
+| `GET` | `/execution/status` | Current executor mode + worker cadence |
+| `POST` | `/execution/run_cycle` | Trigger a single worker tick on demand (requires `X-Internal-Secret`) |
 | `GET` | `/keys` | List API keys |
 | `POST` | `/keys` | Create API key |
 | `DELETE` | `/keys/{id}` | Revoke API key |
@@ -191,12 +209,18 @@ Full API reference: [`docs/05_API_REFERENCE.md`](./docs/05_API_REFERENCE.md)
 ```
 sigma/
 ├── apps/
-│   ├── web/          # Next.js — landing, dashboard, docs, billing
-│   └── api/          # FastAPI — signals, ML, quantum, portfolio
+│   ├── web/          # Next.js — landing, dashboard, docs, billing, positions, orders, execution
+│   ├── api/          # FastAPI — signals, ML, quantum, portfolio, markets, execution adapters, risk
+│   └── worker/       # Long-running asyncio service — per-tick trading cycle (paper + Coinbase)
 ├── packages/
-│   ├── db/           # SQL migrations + schema
-│   └── types/        # Shared TypeScript types
-├── docker-compose.yml
+│   ├── db/           # SQL migrations 001–006 + schema
+│   └── types/        # Shared TypeScript types — barrel `@sigma/types`
+├── .github/workflows/  # CI (pytest + npm type-check on push/PR)
+├── docs/
+│   ├── ROADMAP.md      # Milestone-level strategy (M1 alpha → M2 beta → M3 production)
+│   └── …
+├── 06_ROADMAP.md       # Granular daily checklist (Sprint 1)
+├── docker-compose.yml  # postgres + redis + worker (under --profile worker)
 ├── Makefile
 └── .env.example
 ```
@@ -208,14 +232,18 @@ Full structure with every file documented: [`docs/02_PROJECT_STRUCTURE.md`](./do
 ## Development Commands
 
 ```bash
-make dev        # Start all services and both dev servers
-make test       # Run backend (pytest) + frontend (type-check)
-make migrate    # Run pending SQL migrations
-make seed       # Seed dev database with test data
-make lint       # ruff (Python) + eslint (TypeScript)
-make format     # black (Python) + prettier (TypeScript)
-make logs       # Tail all Docker container logs
-make clean      # Stop Docker and remove volumes
+make dev            # Start all services and both dev servers
+make test           # Run backend (pytest) + frontend (type-check)
+make migrate        # Run pending SQL migrations
+make seed           # Seed dev database with test data
+make lint           # ruff (Python) + eslint (TypeScript)
+make format         # black (Python) + prettier (TypeScript)
+make logs           # Tail all Docker container logs
+make clean          # Stop Docker and remove volumes
+
+make worker         # Build + run the live trading worker (Docker --profile worker)
+make worker-local   # Run the worker directly against local Postgres + Redis
+make train-ranking  # Fetch Coinbase history + fit the crypto RankingModel artifact
 ```
 
 ---
@@ -230,7 +258,8 @@ make clean      # Stop Docker and remove volumes
 | [`docs/03_ENV_VARS.md`](./docs/03_ENV_VARS.md) | All environment variables and where to get them |
 | [`docs/04_DATABASE_SCHEMA.md`](./docs/04_DATABASE_SCHEMA.md) | SQL migrations and schema design decisions |
 | [`docs/05_API_REFERENCE.md`](./docs/05_API_REFERENCE.md) | Full endpoint reference with request/response shapes |
-| [`docs/06_ROADMAP.md`](./docs/06_ROADMAP.md) | Week-by-week build plan with acceptance criteria |
+| [`docs/ROADMAP.md`](./docs/ROADMAP.md) | Milestone-level strategic roadmap (M1 alpha → M2 beta → M3 production) |
+| [`06_ROADMAP.md`](./06_ROADMAP.md) | Granular daily checklist with done-when criteria |
 
 ---
 
@@ -312,6 +341,19 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/sigma
 REDIS_URL=redis://localhost:6379
 
+# Worker / live trading (only needed when running apps/worker)
+INTERNAL_SECRET=change-me              # Worker uses this to call /signals
+EXECUTOR_MODE=paper                    # paper | coinbase
+WORKER_ASSET_CLASSES=crypto            # comma-separated: crypto,equity
+COINBASE_API_KEY_NAME=                 # required when EXECUTOR_MODE=coinbase
+COINBASE_PRIVATE_KEY=
+COINBASE_SANDBOX=true
+
+# Sentiment provider (optional)
+SENTIMENT_PROVIDER=finbert             # finbert | langextract | ollama | hybrid | none
+LX_MODEL_ID=mistral:7b-instruct        # only used when langextract/ollama selected
+LX_MODEL_URL=http://127.0.0.1:11434
+
 # IBM Quantum (optional for local dev — uses simulator by default)
 IBM_QUANTUM_TOKEN=
 IBM_QUANTUM_BACKEND=ibm_brisbane
@@ -340,11 +382,14 @@ Usage-based option: $0.01 per signal call — no subscription required.
 - [x] API key management dashboard
 - [x] Portfolio rebalancer (CVXPY + QAOA)
 - [x] Strategy backtesting engine
-- [ ] FinBERT sentiment overlay (Month 2)
-- [ ] Replicate model hosting for inference revenue (Month 2)
-- [ ] WebSocket streaming signals (Month 3)
-- [ ] Multi-asset correlation signals (Month 3)
-- [ ] Enterprise SLA + dedicated endpoints (Month 4)
+- [x] **razorBill absorption** — crypto signals, multi-strategy combiner, advanced exits, dynamic universe
+- [x] **Live worker loop** — paper executor, Coinbase Advanced Trade adapter, ExitState persistence, rebuy cooldown
+- [x] **Shared TypeScript types** + first CI workflow
+- [ ] **M1 — Internal alpha** (current) — Railway deploy + trained RankingModel + observability
+- [ ] **M2 — Beta** — multi-tenant crypto signals + customer-facing web pages + Stripe metering for crypto
+- [ ] **M3 — Production** — Coinbase sandbox → live, per-day notional cap, DR runbook
+
+See [`docs/ROADMAP.md`](./docs/ROADMAP.md) for the strategic milestone view and [`06_ROADMAP.md`](./06_ROADMAP.md) for the granular daily checklist.
 
 ---
 

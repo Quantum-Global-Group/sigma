@@ -22,8 +22,8 @@ jobs:
 
       - name: Python tests
         run: |
-          pip install -r apps/api/requirements.txt
-          cd apps/api && pytest -v
+          pip install -r apps/api/requirements.txt -r apps/api/requirements-dev.txt
+          cd apps/api && PYTHONPATH=. pytest -v
 
       - uses: actions/setup-node@v4
         with:

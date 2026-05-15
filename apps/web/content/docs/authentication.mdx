@@ -1,0 +1,37 @@
+# Authentication
+
+Every SIGMA endpoint (except `/health` and `/ready`) requires an API key.
+
+## Header format
+
+```http
+Authorization: Bearer sk_live_xxxxxxxxxxxxxxxxxxxx
+```
+
+Keys are prefixed:
+
+- `sk_live_` — production key, billed against your plan
+- `sk_test_` — test key, no billing but rate limits still apply
+
+## How keys are validated
+
+1. The `Authorization` header is parsed by the API auth middleware.
+2. We hash the raw key with SHA-256 and look it up in `api_keys.key_hash`.
+3. Successful lookups are cached in Redis for 24 hours to avoid repeat DB hits.
+4. Revoking a key in the dashboard invalidates the cache immediately.
+
+## Rotating keys
+
+- Create a new key in the dashboard and deploy it before revoking the old one.
+- Revoked keys return `401 Invalid API key` on the very next request.
+- Keys are scoped to the account, not to a specific environment — use the `sk_test_` prefix to keep billing separate.
+
+## Common errors
+
+| Status | Code | Meaning |
+|--------|------|---------|
+| 401 | `INVALID_API_KEY` | Header missing, malformed, or key revoked |
+| 422 | `VALIDATION_ERROR` | Header present but not the `Bearer ...` shape |
+| 429 | `RATE_LIMIT_EXCEEDED` | Key valid but plan budget exceeded |
+
+See [Rate Limits](/docs/rate-limits) for budgets and headers.

@@ -3,20 +3,6 @@ import { redirect } from "next/navigation";
 import { PlanBadge } from "@/components/billing/PlanBadge";
 import { UsageMeter } from "@/components/billing/UsageMeter";
 
-async function fetchUsageServer(apiKey: string) {
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  try {
-    const res = await fetch(`${apiBase}/usage`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      next: { revalidate: 30 },
-    });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
 export default async function DashboardPage() {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");

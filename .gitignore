@@ -39,3 +39,7 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Local-only docker-compose port overrides (added during PR #1 verification)
+docker-compose.override.yml
+

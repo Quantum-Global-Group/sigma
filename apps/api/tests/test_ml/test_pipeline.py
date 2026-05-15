@@ -122,8 +122,12 @@ class TestPredict:
         assert result.signal in ("BUY", "HOLD")
 
     def test_overbought_rsi_biases_sell(self):
+        # Force the heuristic path: the registry may load a saved ensemble
+        # model from saved_models/ which would classify these features however
+        # the trained weights say, defeating the test's intent.
         features = pd.DataFrame([{"rsi_14": 85.0, "roc_10": 0.0, "ema_20": 98.0, "ema_50": 102.0, "ema_ratio": 0.96, "bb_width": 0.08, "atr_14": 2.0, "volume_ratio": 0.8, "ret_1d": -0.01, "ret_5d": -0.04}])
-        result = predict(features)
+        with patch("ml.models.registry.resolve", return_value=None):
+            result = predict(features)
         assert result.signal in ("SELL", "HOLD")
 
 
@@ -131,12 +135,19 @@ class TestPredict:
 
 class TestRunSignalPipeline:
     def test_end_to_end_mocked(self):
+        # The pipeline uses MarketAdapter (markets/) rather than the raw
+        # ml.data.fetch_ohlcv helper since the asset-class refactor; patch
+        # the equity adapter's fetch_ohlcv at the class level so all
+        # registry-acquired instances use the mock.
         mock_df = _make_ohlcv(80)
-        with patch("ml.pipeline.fetch_ohlcv", return_value=mock_df):
+        with patch("markets.equity.EquityAdapter.fetch_ohlcv", return_value=mock_df):
             result = run_signal_pipeline("AAPL", "daily")
         assert result.signal in ("BUY", "SELL", "HOLD")
 
     def test_propagates_value_error_on_bad_ticker(self):
-        with patch("ml.pipeline.fetch_ohlcv", side_effect=ValueError("No data returned for ticker: XXXX")):
+        with patch(
+            "markets.equity.EquityAdapter.fetch_ohlcv",
+            side_effect=ValueError("No data returned for ticker: XXXX"),
+        ):
             with pytest.raises(ValueError, match="No data"):
                 run_signal_pipeline("XXXX", "daily")

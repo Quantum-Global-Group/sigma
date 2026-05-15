@@ -7,7 +7,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from middleware.logging import StructuredLoggingMiddleware
-from routers import backtest, health, internal, keys, portfolio, signals, usage
+from routers import (
+    backtest,
+    execution,
+    health,
+    internal,
+    keys,
+    orders,
+    portfolio,
+    positions,
+    signals,
+    usage,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -31,6 +42,10 @@ async def lifespan(app: FastAPI):
     from cache.redis import _pool
     if _pool is not None:
         await _pool.aclose()
+
+    from ml.langfuse_tracing import flush as _flush_langfuse, is_enabled as _langfuse_enabled
+    if _langfuse_enabled():
+        _flush_langfuse()
 
 
 def create_app() -> FastAPI:
@@ -58,6 +73,9 @@ def create_app() -> FastAPI:
     app.include_router(portfolio.router)
     app.include_router(backtest.router)
     app.include_router(internal.router)
+    app.include_router(positions.router)
+    app.include_router(orders.router)
+    app.include_router(execution.router)
 
     return app
 

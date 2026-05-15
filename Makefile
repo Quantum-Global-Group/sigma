@@ -1,4 +1,4 @@
-.PHONY: dev migrate seed test lint format logs clean help
+.PHONY: dev migrate seed test lint format logs clean help package-gumroad load-test worker worker-local train-ranking
 
 MIGRATIONS_DIR := packages/db/migrations
 PG_USER        := postgres
@@ -14,6 +14,11 @@ help:
 	@echo "  make format   Format Python (black) + TypeScript (prettier)"
 	@echo "  make logs     Tail all Docker logs"
 	@echo "  make clean    Stop Docker + remove volumes (WARNING: deletes data)"
+	@echo "  make package-gumroad  Build dist/gumroad/*.zip bundles for upload"
+	@echo "  make load-test        Run Locust against SIGMA_LOADTEST_BASE_URL"
+	@echo "  make worker           Start the live trading worker in Docker (uses --profile worker)"
+	@echo "  make worker-local     Run the worker directly against local Postgres+Redis"
+	@echo "  make train-ranking    Fetch Coinbase history and fit the crypto RankingModel"
 
 dev:
 	docker compose up -d
@@ -50,3 +55,23 @@ logs:
 
 clean:
 	docker compose down -v
+
+package-gumroad:
+	bash scripts/package_gumroad_assets.sh
+
+load-test:
+	@if [ -z "$$SIGMA_LOADTEST_BASE_URL" ]; then \
+		echo "ERROR: set SIGMA_LOADTEST_BASE_URL (and SIGMA_LOADTEST_API_KEY for /signals)"; exit 1; \
+	fi
+	locust -f tests/load_test.py --host "$$SIGMA_LOADTEST_BASE_URL"
+
+worker:
+	docker compose --profile worker up -d --build worker
+	docker compose logs -f worker
+
+worker-local:
+	cd apps/api && PYTHONPATH=. python -m worker.main
+
+train-ranking:
+	cd apps/api && PYTHONPATH=. python scripts/train_ranking.py $(ARGS)
+

@@ -164,3 +164,93 @@ export async function fetchSignalHistory(
     apiKey
   );
 }
+
+// ─── Trading: positions, orders, execution ───────────────────────────────────
+
+export type AssetClass = "equity" | "crypto";
+
+export type Position = {
+  id: string;
+  asset_class: AssetClass;
+  symbol: string;
+  qty: number;
+  entry_px: number;
+  entry_ts: string;
+  current_px: number | null;
+  unrealized_pnl: number | null;
+  realized_pnl: number;
+  closed: boolean;
+  closed_at: string | null;
+};
+
+export type Order = {
+  id: string;
+  asset_class: AssetClass;
+  symbol: string;
+  ts: string;
+  side: "buy" | "sell";
+  qty: number;
+  px: number;
+  fee: number;
+  slippage_bps: number | null;
+  executor: string;
+  external_id: string | null;
+  status: string;
+};
+
+export type ExecutionStatus = {
+  executor_mode: string;
+  coinbase_sandbox: boolean;
+  worker_asset_classes_default_crypto_seconds: number;
+  worker_asset_classes_default_equity_seconds: number;
+};
+
+export async function fetchPositions(
+  apiKey: string,
+  opts: { asset_class?: AssetClass; open_only?: boolean; limit?: number } = {}
+): Promise<Position[]> {
+  const params = new URLSearchParams();
+  if (opts.asset_class) params.set("asset_class", opts.asset_class);
+  params.set("open_only", String(opts.open_only ?? true));
+  params.set("limit", String(opts.limit ?? 50));
+  return apiFetch<Position[]>(`/positions?${params.toString()}`, apiKey);
+}
+
+export async function fetchOrders(
+  apiKey: string,
+  opts: { asset_class?: AssetClass; symbol?: string; limit?: number } = {}
+): Promise<Order[]> {
+  const params = new URLSearchParams();
+  if (opts.asset_class) params.set("asset_class", opts.asset_class);
+  if (opts.symbol) params.set("symbol", opts.symbol);
+  params.set("limit", String(opts.limit ?? 50));
+  return apiFetch<Order[]>(`/orders?${params.toString()}`, apiKey);
+}
+
+export async function fetchExecutionStatus(apiKey: string): Promise<ExecutionStatus> {
+  return apiFetch<ExecutionStatus>("/execution/status", apiKey);
+}
+
+/**
+ * Trigger a single worker tick on demand. Requires the X-Internal-Secret header
+ * (the API rejects customer keys for this endpoint with 403). The secret is
+ * passed as the second argument and never bundled with apiKey.
+ */
+export async function triggerRunCycle(
+  internalSecret: string,
+  asset_class: AssetClass
+): Promise<{ asset_class: AssetClass; triggered: boolean }> {
+  const res = await fetch(`${API_BASE}/execution/run_cycle`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Internal-Secret": internalSecret,
+    },
+    body: JSON.stringify({ asset_class }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((err as { detail?: string }).detail ?? `Request failed: ${res.status}`);
+  }
+  return res.json();
+}

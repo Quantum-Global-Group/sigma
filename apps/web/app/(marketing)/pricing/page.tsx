@@ -32,7 +32,7 @@ const PLANS = [
 
 export default function PricingPage() {
   return (
-    <main className="min-h-screen bg-gray-950 text-white px-8 py-24">
+    <main className="px-8 py-24">
       <div className="max-w-5xl mx-auto">
         <h1 className="text-5xl font-bold text-center mb-4">Simple pricing</h1>
         <p className="text-gray-400 text-center text-xl mb-16">Start free. Upgrade when you need more.</p>

@@ -29,5 +29,28 @@ services:
       timeout: 3s
       retries: 5
 
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: sigma-worker-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:password@postgres:5432/sigma
+      REDIS_URL: redis://redis:6379
+      INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-internal-secret}
+      WORKER_ASSET_CLASSES: ${WORKER_ASSET_CLASSES:-crypto}
+      EXECUTOR_MODE: ${EXECUTOR_MODE:-paper}
+      SENTIMENT_PROVIDER: ${SENTIMENT_PROVIDER:-finbert}
+      COINBASE_API_KEY_NAME: ${COINBASE_API_KEY_NAME:-}
+      COINBASE_PRIVATE_KEY: ${COINBASE_PRIVATE_KEY:-}
+      COINBASE_SANDBOX: ${COINBASE_SANDBOX:-true}
+    profiles: ["worker"]
+    restart: unless-stopped
+
 volumes:
   postgres_data:

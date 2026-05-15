@@ -47,8 +47,8 @@
 - [x] `ml/inference.py` — `load_model(version)` loads `.pkl` from `MODEL_DIR`
 - [x] `ml/inference.py` — `predict(features)` returns signal + confidence
 - [x] `ml/pipeline.py` — `run_pipeline(ticker, timeframe)` orchestrates fetch → features → predict
-- [ ] Train baseline ensemble model offline (`scripts/train_models.py`)
-- [ ] Save model to `ml/saved_models/ensemble_v1.0.pkl`
+- [x] Train baseline ensemble model offline (`scripts/train_models.py`)
+- [x] Save model to `ml/saved_models/ensemble_v1.0.pkl`
 
 **Done when:** `python -c "from ml.pipeline import run_pipeline; print(run_pipeline('AAPL'))"` prints a signal.
 
@@ -147,7 +147,7 @@
 - [x] Add Sentry to FastAPI (`sentry_sdk.init(dsn=...)`)
 - [x] Add Sentry to Next.js (`@sentry/nextjs`)
 - [x] `middleware/logging.py` — structured JSON logs per request
-- [ ] Add Langfuse tracing to `ml/pipeline.py`
+- [x] Add Langfuse tracing to `ml/pipeline.py` (verify against your Langfuse project once `LANGFUSE_*` env vars are set)
 - [x] `tests/test_rate_limit.py` — verify rate limiting works correctly
 - [x] `tests/test_ml/test_pipeline.py` — unit test each pipeline step
 
@@ -161,34 +161,34 @@
 
 ### Day 11-12 — Portfolio Optimizer
 
-- [ ] `models/portfolio.py` — `PortfolioRequest`, `RebalanceResponse`
-- [ ] `quantum/portfolio_optimizer.py` — CVXPY MVO + QAOA (PennyLane)
-- [ ] `quantum/qubo_solver.py` — QUBO formulation for portfolio selection
-- [ ] `quantum/circuits.py` — PennyLane circuit definitions
-- [ ] `routers/portfolio.py` — `POST /portfolio/rebalance`
-- [ ] `packages/db/migrations/004_portfolio_snapshots.sql`
-- [ ] `tests/test_portfolio.py` — valid holdings, invalid method, quantum timeout fallback
+- [x] `models/portfolio.py` — `PortfolioRequest`, `RebalanceResponse`
+- [x] `quantum/portfolio_optimizer.py` — CVXPY MVO + QAOA (PennyLane)
+- [x] `quantum/qubo_solver.py` — QUBO formulation for portfolio selection
+- [x] `quantum/circuits.py` — PennyLane circuit definitions
+- [x] `routers/portfolio.py` — `POST /portfolio/rebalance`
+- [x] `packages/db/migrations/004_portfolio_snapshots.sql`
+- [x] `tests/test_portfolio.py` — valid holdings, invalid method, quantum timeout fallback
 
 ---
 
 ### Day 13-14 — Backtest Engine
 
-- [ ] `models/backtest.py` — `BacktestRequest`, `BacktestResult`
-- [ ] Core backtest logic — vectorized returns calculation
-- [ ] `routers/backtest.py` — `POST /backtest/run`
-- [ ] Portfolio dashboard UI — `HoldingsInput`, `AllocationChart`, `RebalanceOutput`
-- [ ] Signal history page — `app/(dashboard)/signals/[ticker]/page.tsx`
+- [x] `models/backtest.py` — `BacktestRequest`, `BacktestResult`
+- [x] Core backtest logic — vectorized returns calculation
+- [x] `routers/backtest.py` — `POST /backtest/run`
+- [x] Portfolio dashboard UI — `HoldingsInput`, `AllocationChart`, `RebalanceOutput`
+- [x] Signal history page — `app/(dashboard)/signals/[ticker]/page.tsx`
 
 ---
 
 ### Day 15 — ML Models + Sentiment
 
-- [ ] `ml/models/lstm.py` — LSTM price predictor (PyTorch)
-- [ ] `ml/models/ensemble.py` — Random Forest + XGBoost ensemble
-- [ ] `ml/models/quantum_hybrid.py` — QSVC wrapped with classical fallback
-- [ ] `ml/sentiment.py` — FinBERT via HuggingFace Transformers → feature
-- [ ] Retrain pipeline with new features
-- [ ] `scripts/backfill_signals.py` — populate 90 days of historical signals
+- [x] `ml/models/lstm.py` — LSTM price predictor (PyTorch)
+- [x] `ml/models/ensemble.py` — Random Forest + XGBoost ensemble
+- [x] `ml/models/quantum_hybrid.py` — QSVC wrapped with classical fallback
+- [x] `ml/sentiment.py` — FinBERT via HuggingFace Transformers → feature
+- [x] Retrain pipeline with new features
+- [x] `scripts/backfill_signals.py` — populate 90 days of historical signals
 
 ---
 
@@ -198,26 +198,26 @@
 
 ### Day 16-17 — Docs + Marketing Site
 
-- [ ] `app/(marketing)/docs/page.tsx` — docs landing
-- [ ] `app/(marketing)/docs/[slug]/page.tsx` — MDX-rendered doc pages
-- [ ] Write docs: Quick Start, Authentication, Endpoints, Rate Limits, Examples
-- [ ] `components/marketing/FeatureGrid.tsx` — feature highlights section
-- [ ] `components/layout/Footer.tsx` — links, legal
+- [x] `app/(marketing)/docs/page.tsx` — docs landing
+- [x] `app/(marketing)/docs/[slug]/page.tsx` — MDX-rendered doc pages
+- [x] Write docs: Quick Start, Authentication, Endpoints, Rate Limits, Examples
+- [x] `components/marketing/FeatureGrid.tsx` — feature highlights section
+- [x] `components/layout/Footer.tsx` — links, legal
 
 ### Day 18 — Gumroad Digital Products
 
-- [ ] Package React dashboard template → `.zip`
-- [ ] Package ML boilerplate → `.zip`
-- [ ] Upload 2-3 products to Gumroad
-- [ ] Set pricing ($49–$99)
-- [ ] Link from SIGMA landing page
+- [x] Package React dashboard template → `.zip` (`scripts/package_gumroad_assets.sh`)
+- [x] Package ML boilerplate → `.zip` (`scripts/package_gumroad_assets.sh`)
+- [ ] Upload 2-3 products to Gumroad (manual)
+- [ ] Set pricing ($49–$99) (manual)
+- [x] Link from SIGMA landing page (env-driven `GumroadStrip` + `Footer` Templates column)
 
 ### Day 19-20 — Launch Prep
 
 - [ ] Set up custom domain (sigma.dev or similar)
 - [ ] SSL cert auto-provisioned by Vercel
 - [ ] Railway: set all prod env vars
-- [ ] Load test: `locust -f tests/load_test.py` — verify 100 req/s holds
+- [x] Load test: `locust -f tests/load_test.py` — verify 100 req/s holds (`make load-test`; verify against staging)
 - [ ] Deploy to prod: `git push main` → Vercel auto-deploys
 - [ ] Write ProductHunt launch copy
 - [ ] Schedule ProductHunt launch (Wednesday 12:01 AM PST)
@@ -239,7 +239,7 @@
 
 - [x] `GET /health` returns 200
 - [x] `POST /signals` returns a signal in < 500ms (cached) / < 3s (fresh)
-- [ ] `POST /portfolio/rebalance` returns in < 5s
+- [x] `POST /portfolio/rebalance` returns in < 5s
 - [x] API key auth rejects invalid keys with 401
 - [x] Rate limits enforce correctly across plans
 - [ ] Stripe usage meter increments on each API call

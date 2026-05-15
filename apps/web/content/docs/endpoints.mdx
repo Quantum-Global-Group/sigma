@@ -1,0 +1,95 @@
+# Endpoints
+
+Base URL: `https://api.sigma.dev` in production, `http://localhost:8000` for local development. All requests require `Authorization: Bearer ...` unless noted.
+
+## Health
+
+### `GET /health`
+
+No auth. Returns `{ "status": "ok", "version": "...", "timestamp": "..." }`.
+
+### `GET /ready`
+
+No auth. 200 only when Postgres and Redis are reachable.
+
+## Signals
+
+### `POST /signals`
+
+Request:
+
+```json
+{ "ticker": "AAPL", "timeframe": "daily" }
+```
+
+Response:
+
+```json
+{
+  "ticker": "AAPL",
+  "timeframe": "daily",
+  "signal": "BUY",
+  "confidence": 0.7821,
+  "predicted_return": 0.0234,
+  "model_version": "v1.0",
+  "cached": false,
+  "timestamp": "2026-04-20T14:32:00Z"
+}
+```
+
+`signal` is one of `BUY`, `SELL`, `HOLD`. Cached responses (`cached: true`) do not count against your plan.
+
+### `GET /signals/{ticker}/history`
+
+Query params: `timeframe` (default `daily`), `limit` (default 30, max 200), `before` (ISO timestamp cursor).
+
+Returns `{ "ticker": "...", "signals": [...], "next_cursor": "..." }`.
+
+## Portfolio
+
+### `POST /portfolio/rebalance`
+
+Request:
+
+```json
+{
+  "holdings": { "AAPL": 10000, "MSFT": 8000 },
+  "method": "mvo"
+}
+```
+
+`method` is one of `mvo`, `equal_weight`, or `quantum_qaoa`. The quantum path falls back to MVO automatically on timeout — the response includes `fallback: true` when that happens.
+
+## Backtest
+
+### `POST /backtest/run`
+
+Request:
+
+```json
+{
+  "tickers": ["SPY"],
+  "start_date": "2020-01-01",
+  "end_date": "2024-12-31",
+  "initial_capital": 100000,
+  "rebalance_freq": "monthly"
+}
+```
+
+Returns total return, Sharpe, max drawdown, equity curve, and trade log.
+
+## API keys
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/keys` | List active keys |
+| `POST` | `/keys` | Create a key (raw value returned once) |
+| `DELETE` | `/keys/{id}` | Revoke a key |
+
+## Usage
+
+### `GET /usage`
+
+Returns current billing-period summary: plan, period, calls, limit, breakdown by endpoint.
+
+See the in-repo [05_API_REFERENCE.md](https://github.com/your-org/sigma/blob/main/05_API_REFERENCE.md) for full field-by-field documentation.

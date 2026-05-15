@@ -6,10 +6,13 @@ import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Overview" },
-  { href: "/dashboard/signals", label: "Signals" },
-  { href: "/dashboard/portfolio", label: "Portfolio" },
-  { href: "/dashboard/api-keys", label: "API Keys" },
-  { href: "/dashboard/billing", label: "Billing" },
+  { href: "/signals", label: "Signals" },
+  { href: "/positions", label: "Positions" },
+  { href: "/orders", label: "Orders" },
+  { href: "/execution", label: "Execution" },
+  { href: "/portfolio", label: "Portfolio" },
+  { href: "/api-keys", label: "API Keys" },
+  { href: "/billing", label: "Billing" },
 ];
 
 export function Sidebar() {

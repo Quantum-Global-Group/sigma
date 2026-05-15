@@ -1,0 +1,39 @@
+# Quick Start
+
+Get a working SIGMA signal in under five minutes. The full local setup lives in `00_QUICKSTART.md` in the repo; this is the condensed path.
+
+## 1. Sign up and create an API key
+
+1. Create an account at [/sign-up](/sign-up).
+2. Open the dashboard, go to **API Keys**, and click **Create key**.
+3. Copy the raw `sk_live_...` value. We never show it again.
+
+## 2. Call the signal endpoint
+
+```bash
+curl -X POST https://api.sigma.dev/signals \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"ticker": "AAPL", "timeframe": "daily"}'
+```
+
+You should see a JSON response with `signal`, `confidence`, and `predicted_return`.
+
+## 3. Wire it into your app
+
+- Use the `cached: true` flag to avoid double-billing repeat lookups.
+- Cache responses on your side for the timeframe you requested.
+- For multi-asset rebalancing, call [`POST /portfolio/rebalance`](/docs/endpoints) instead of looping signal calls.
+
+## Run SIGMA locally
+
+```bash
+git clone https://github.com/your-org/sigma.git
+cd sigma
+cp .env.example .env
+docker compose up -d
+make migrate
+make dev
+```
+
+Then `curl http://localhost:8000/health` should return `{"status": "ok"}`.

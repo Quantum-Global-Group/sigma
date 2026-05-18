@@ -1,0 +1,47 @@
+# SIGMA Worker — Fly.io deployment
+#
+# Long-running asyncio service that drives the per-tick trading cycle. No
+# public HTTP surface — only outbound calls (Coinbase market data, sigma-api
+# via internal hostname, Postgres, Redis).
+#
+# Single instance only. Two workers would double-place orders.
+#
+# Provision once:
+#   fly launch --copy-config --no-deploy --dockerfile apps/worker/Dockerfile \
+#     --org <your-org> --name sigma-worker
+#   fly secrets set INTERNAL_SECRET=... DATABASE_URL=... REDIS_URL=... \
+#                   COINBASE_API_KEY_NAME=... COINBASE_PRIVATE_KEY=... \
+#                   SENTRY_DSN=... HUGGINGFACE_TOKEN=...
+#   # Re-use sigma-pg + Upstash Redis from the api app (set DATABASE_URL/REDIS_URL
+#   # to the same private flycast addresses).
+# Deploy:
+#   fly deploy
+
+app = "sigma-worker"
+primary_region = "ord"
+kill_signal = "SIGTERM"
+kill_timeout = "60s"  # let the current tick finish before stopping
+
+[build]
+  dockerfile = "Dockerfile"
+  # Build context is the repo root (the Dockerfile COPYs apps/api and apps/worker).
+  # Run `fly deploy` from the repo root, not from apps/worker/.
+
+[env]
+  ENVIRONMENT = "production"
+  WORKER_ASSET_CLASSES = "crypto"
+  EXECUTOR_MODE = "paper"           # flip to "coinbase" when ready
+  WORKER_TICK_SECONDS_CRYPTO = "300"
+  SENTIMENT_PROVIDER = "finbert"
+  # All other vars (DATABASE_URL, REDIS_URL, COINBASE_*, INTERNAL_SECRET, etc.)
+  # come from `fly secrets`.
+
+# CRITICAL: single instance only. Two workers race on positions + orders.
+[deploy]
+  strategy = "immediate"  # no rolling deploy — stop old, start new
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+  # Worker runs continuously; no auto-stop. Bump to 2gb if torch/transformers
+  # memory pressure shows up (FinBERT alone is ~440MB resident).

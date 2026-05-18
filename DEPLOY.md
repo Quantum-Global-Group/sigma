@@ -1,95 +1,205 @@
 # SIGMA — Deployment Runbook
 
-This is the manual-but-repeatable path to take SIGMA from `localhost` to a public,
-billable production deployment. Pair this with [03_ENV_VARS.md](03_ENV_VARS.md) for
-the full env-var reference and [06_ROADMAP.md](06_ROADMAP.md) for the launch
-checklist.
+Manual-but-repeatable path from `localhost` to a public, billable production deployment. Pair this with [docs/03_ENV_VARS.md](docs/03_ENV_VARS.md) for the full env-var reference and [docs/ROADMAP.md](docs/ROADMAP.md) / [06_ROADMAP.md](06_ROADMAP.md) for the milestone + daily plans.
 
 ```mermaid
 flowchart LR
   GH[GitHub repo] --> Vercel
-  GH --> Railway
+  GH --> FlyApi[Fly: sigma-api]
+  GH --> FlyWorker[Fly: sigma-worker]
   Vercel --> WebProd[apps/web prod]
-  Railway --> ApiProd[apps/api prod]
-  ApiProd --> Postgres[(Postgres + TimescaleDB)]
-  ApiProd --> Redis[(Redis)]
-  WebProd --> ApiProd
+  FlyApi --> Postgres[(Postgres + TimescaleDB)]
+  FlyApi --> Redis[(Upstash Redis)]
+  FlyWorker --> Postgres
+  FlyWorker --> Redis
+  FlyWorker --> Coinbase[(Coinbase Advanced Trade)]
+  WebProd --> FlyApi
   Stripe -->|webhook| WebProd
   Clerk -->|webhook| WebProd
-  WebProd -->|"/internal/*"| ApiProd
+  WebProd -->|"/internal/*"| FlyApi
 ```
 
 ## 1. Provision infrastructure
 
-| Service | Provider (suggested) | Notes |
-|---------|----------------------|-------|
-| Web app | Vercel | Connect the GitHub repo, set the `apps/web` root directory |
-| API | Railway | Dockerfile or Nixpacks, set the `apps/api` root directory |
-| Postgres + TimescaleDB | Railway / Neon / Supabase | Must support the `timescaledb` extension |
-| Redis | Railway / Upstash | TLS connection string |
+| Component | Provider (recommended) | Notes |
+|---|---|---|
+| Web app | Vercel | Connect the GitHub repo, set `apps/web` as root directory |
+| API service | Fly.io | `apps/api/fly.toml`, app name `sigma-api`, primary region `ord` |
+| Worker service | Fly.io | `apps/worker/fly.toml`, app name `sigma-worker`, **single instance only** |
+| Postgres + TimescaleDB | Timescale Cloud (free 30 days) **or** Crunchy Bridge **or** self-hosted on a Fly machine | Migration `002_timescaledb.sql` calls `create_hypertable('candles', ...)`. Vanilla Postgres won't apply; pick a provider with the extension or skip the hypertable line for the alpha. |
+| Redis | Upstash (Redis-compatible) | Fly sunset their managed Redis; Upstash free tier is the typical pair |
 | Auth | Clerk | Production instance, copy publishable + secret key |
 | Billing | Stripe | Live mode products: Free, Pro ($49), Enterprise ($499) |
-| Errors | Sentry | One project for `apps/web`, one for `apps/api` |
+| Errors | Sentry | One project for `apps/web`, one shared between `apps/api` + `apps/worker` |
 
-## 2. Configure environment variables
-
-Copy values from [.env.example](.env.example), then set them in **both** Vercel and
-Railway dashboards. Critical pairs:
-
-- `INTERNAL_SECRET` must match between `apps/web` and `apps/api`. The Clerk and
-  Stripe webhook handlers in `apps/web/app/api/webhooks/*` use it to call
-  `apps/api/routers/internal.py`.
-- `NEXT_PUBLIC_API_URL` (Vercel) must point at the public Railway URL of the API.
-- `STRIPE_PRICE_PRO` and `STRIPE_PRICE_ENTERPRISE` must be the live-mode price IDs
-  so [apps/web/app/api/webhooks/stripe/route.ts](apps/web/app/api/webhooks/stripe/route.ts)
-  maps subscription events to the right plan.
-- `NEXT_PUBLIC_GUMROAD_DASHBOARD_URL` and `NEXT_PUBLIC_GUMROAD_ML_URL` are optional;
-  the landing page hides the Templates strip when blank.
-
-## 3. Database migrations
-
-After Railway provisions Postgres:
+## 2. One-time Fly setup
 
 ```bash
-DATABASE_URL=postgresql+asyncpg://... \
-  python -c "import asyncio; from db.connection import init_db; asyncio.run(init_db())"
+# Install the CLI
+curl -L https://fly.io/install.sh | sh
+
+# Authenticate
+fly auth login
+
+# API app
+cd apps/api
+fly launch --copy-config --no-deploy --org <your-org> --name sigma-api
+cd ../..
+
+# Worker app  (build context = repo root, fly.toml lives in apps/worker)
+cd apps/worker
+fly launch --copy-config --no-deploy --org <your-org> --name sigma-worker
+cd ../..
 ```
 
-Or apply the SQL files in [packages/db/migrations/](packages/db/migrations/) in
-numeric order against the prod database. Run `001_initial_schema.sql`,
-`002_timescaledb.sql`, `003_billing_events.sql`, `004_portfolio_snapshots.sql`.
+`--copy-config` tells Fly to use the existing `fly.toml`; `--no-deploy` skips the first build until secrets are set.
 
-## 4. Webhooks
+## 3. Configure environment variables
+
+Set every secret-bearing var via `fly secrets set`. Plain config (port numbers, mode flags) lives in `fly.toml` `[env]`.
+
+```bash
+# Shared between sigma-api and sigma-worker — same value on both apps
+SHARED="\
+  INTERNAL_SECRET=$(openssl rand -hex 32) \
+  CLERK_SECRET_KEY=sk_live_... \
+  STRIPE_SECRET_KEY=sk_live_... \
+  STRIPE_WEBHOOK_SECRET=whsec_... \
+  HUGGINGFACE_TOKEN=hf_... \
+  SENTRY_DSN=https://... \
+  LANGFUSE_PUBLIC_KEY=pk_lf_... \
+  LANGFUSE_SECRET_KEY=sk_lf_..."
+
+fly secrets set -a sigma-api    $SHARED
+fly secrets set -a sigma-worker $SHARED
+
+# Worker-only secrets
+fly secrets set -a sigma-worker \
+  COINBASE_API_KEY_NAME=organizations/... \
+  COINBASE_PRIVATE_KEY="$(cat coinbase-private-key.pem)" \
+  COINBASE_SANDBOX=true
+
+# Database + Redis URLs (see step 4)
+fly secrets set -a sigma-api    DATABASE_URL=... REDIS_URL=...
+fly secrets set -a sigma-worker DATABASE_URL=... REDIS_URL=...
+```
+
+`INTERNAL_SECRET` must be identical across all three deployments (`apps/web` on Vercel, `sigma-api`, `sigma-worker`). The Clerk + Stripe webhook handlers in `apps/web/app/api/webhooks/*` use it to call `apps/api/routers/internal.py`, and `sigma-worker` uses it to call `/signals` without billing/rate-limit.
+
+`NEXT_PUBLIC_API_URL` (Vercel) must point at the public Fly URL of the API (`https://sigma-api.fly.dev` or a custom domain — see step 9).
+
+## 4. Postgres + Redis
+
+### Postgres (Timescale-capable)
+
+**Option A — Timescale Cloud** (easiest, free 30 days):
+
+```bash
+# Create at https://console.cloud.timescale.com
+# Grab the asyncpg-compatible URL:
+fly secrets set -a sigma-api    DATABASE_URL="postgresql+asyncpg://tsdbadmin:..."
+fly secrets set -a sigma-worker DATABASE_URL="postgresql+asyncpg://tsdbadmin:..."
+```
+
+**Option B — Self-hosted Timescale on a Fly machine** (cheapest, more ops):
+
+```bash
+fly machine run timescale/timescaledb:latest-pg15 \
+  --name sigma-pg \
+  --org <your-org> \
+  --region ord \
+  --env POSTGRES_PASSWORD=$(openssl rand -hex 24)
+# Then export the flycast hostname as DATABASE_URL
+```
+
+**Option C — Fly's managed Postgres** (no Timescale extension): edit migration `002_timescaledb.sql` to skip the `create_hypertable` call, or drop the file. Loses the hypertable optimization on `candles` but the alpha doesn't need it.
+
+### Redis (Upstash)
+
+Sign up at https://upstash.com → Create Database (Redis) → copy the `redis://` connection string. Set as `REDIS_URL` on both apps. Free tier covers 10k commands/day, more than enough for alpha.
+
+## 5. Database migrations
+
+After Postgres exists and `DATABASE_URL` is set:
+
+```bash
+# Pull the DATABASE_URL Fly stored as a secret
+DATABASE_URL=$(fly ssh console -a sigma-api -C 'env | grep ^DATABASE_URL=' | cut -d= -f2-)
+
+# Apply migrations from your local box (install psql if needed)
+for f in packages/db/migrations/*.sql; do
+  echo "applying $f"
+  psql "$(echo "$DATABASE_URL" | sed 's/postgresql+asyncpg:/postgresql:/')" -v ON_ERROR_STOP=1 -f "$f"
+done
+```
+
+Verify:
+
+```sql
+\d signal_history    -- asset_class column should be NOT NULL
+\dt                  -- candles, positions, orders, exit_state present
+select id, clerk_id from users where id = '00000000-0000-0000-0000-000000000001';
+```
+
+## 6. Webhooks
 
 | Source | URL to register | Secret env var |
-|--------|------------------|----------------|
+|---|---|---|
 | Clerk  | `https://<web>/api/webhooks/clerk` | `CLERK_WEBHOOK_SECRET` |
 | Stripe | `https://<web>/api/webhooks/stripe` | `STRIPE_WEBHOOK_SECRET` |
 
-Register from the Clerk and Stripe dashboards after the web app is deployed and
-reachable. Use `stripe trigger customer.subscription.created` locally first to
-confirm the handler logic.
+Register from each dashboard after Vercel and Fly are reachable. Use `stripe trigger customer.subscription.created` locally first to confirm the handler.
 
-## 5. Deploy
-
-- **Web:** push to `main`. Vercel builds and promotes automatically.
-- **API:** push to `main`. Railway runs the build and rolls forward.
-- Optional: add a [Vercel deploy hook](https://vercel.com/docs/deploy-hooks) to
-  rebuild after content-only updates.
-
-## 6. Verify
+## 7. Deploy
 
 ```bash
-curl https://api.sigma.dev/health
-curl -X POST https://api.sigma.dev/signals \
-  -H "Authorization: Bearer sk_live_..." \
-  -d '{"ticker":"AAPL"}'
+# API
+cd apps/api && fly deploy
+
+# Worker (run from repo root so build context is correct)
+fly deploy -a sigma-worker --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile .
+
+# Web
+cd apps/web && vercel --prod
 ```
 
-Confirm in the Stripe dashboard that the meter `api_calls` increments. Confirm
-in the Sentry dashboard that no errors fire for 24 hours after launch.
+GitHub Actions can deploy on push to `main` later; for the alpha, manual is fine.
 
-## 7. Load test (staging only)
+## 8. Verify
+
+```bash
+# Public API health
+curl https://sigma-api.fly.dev/health
+
+# Authenticated signal
+curl -X POST https://sigma-api.fly.dev/signals \
+  -H "Authorization: Bearer sk_live_..." \
+  -d '{"ticker":"AAPL"}'
+
+# Worker tail — should show ticks every 5 minutes (crypto cadence)
+fly logs -a sigma-worker
+
+# Internal cycle trigger (from your laptop, with the shared INTERNAL_SECRET)
+curl -X POST https://sigma-api.fly.dev/execution/run_cycle \
+  -H "X-Internal-Secret: ..." \
+  -d '{"asset_class":"crypto"}'
+```
+
+Stripe meter `api_calls` increments on customer-key requests but **not** on internal-secret requests. Confirm both in the Stripe + Sentry dashboards.
+
+## 9. Custom domain + TLS
+
+```bash
+# API
+fly certs create -a sigma-api api.sigma.dev
+# DNS: CNAME api.sigma.dev → sigma-api.fly.dev
+
+# Web — add sigma.dev in the Vercel dashboard → follow DNS instructions
+```
+
+Fly auto-issues Let's Encrypt certs once DNS resolves.
+
+## 10. Load test (staging only)
 
 ```bash
 pip install locust
@@ -98,27 +208,26 @@ SIGMA_LOADTEST_API_KEY=sk_test_... \
 make load-test
 ```
 
-Open <http://localhost:8089>, dial up users until you see **~100 RPS sustained**.
-Watch for:
+Open <http://localhost:8089>, dial up users until ~100 RPS sustained. Watch for:
 
-- p95 latency over 3s on `POST /signals` &rarr; signal cache misses or DB pressure
-- 429s before you hit the per-plan budget &rarr; Redis sliding-window misconfigured
-- 500s &rarr; check Sentry; usually missing env var or DB pool exhausted
+- p95 latency > 3s on `POST /signals` → signal cache misses or DB pressure
+- 429s before per-plan budget → Redis sliding-window misconfigured
+- 500s → Sentry; usually missing env var or DB pool exhausted
 
 Never point the load test at production.
 
-## 8. Custom domain + TLS
-
-- Add `sigma.dev` and `api.sigma.dev` in Vercel/Railway dashboards.
-- DNS: CNAME `sigma.dev` to Vercel, CNAME `api.sigma.dev` to Railway.
-- SSL: both providers issue Let's Encrypt certs automatically.
-
-## 9. Launch checklist (from 06_ROADMAP.md)
+## 11. Launch checklist (from 06_ROADMAP.md)
 
 - [ ] `GET /health` returns 200 from prod
 - [ ] `POST /signals` < 500ms cached / < 3s fresh
 - [ ] `POST /portfolio/rebalance` < 5s
-- [ ] Stripe usage meter increments per call
-- [ ] Sign up &rarr; create key &rarr; call API &rarr; see usage in under 5 minutes
+- [ ] Worker `fly logs` shows one healthy tick per cadence interval
+- [ ] `select count(*) from orders where executor='paper'` > 0 after the first hour
+- [ ] Stripe usage meter increments per customer-key call, **not** on internal-secret calls
+- [ ] Sign up → create key → call API → see usage in under 5 minutes
 - [ ] Zero Sentry errors for 24h after launch
-- [ ] Landing loads in &lt; 2s on Vercel edge (Lighthouse mobile)
+- [ ] Landing loads in < 2s on Vercel edge (Lighthouse mobile)
+
+## Why Fly over Railway
+
+Fly was picked for the alpha for three reasons: Docker-first model that matches our existing `Dockerfile`s exactly; cheaper for always-on workers ($5–15/mo vs $15–25); finer regional control if EU customers come later. Railway, Render, and self-hosting on Hetzner are all viable swaps if Fly proves annoying — the only Fly-specific files are `apps/api/fly.toml` and `apps/worker/fly.toml`.

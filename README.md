@@ -79,7 +79,7 @@ Three services. The API gateway (TypeScript, Vercel) handles auth and billing. T
 
 **Payments** — Stripe Billing (usage metering + subscriptions), Gumroad (digital products)
 
-**Deploy** — Vercel (frontend), Railway (backend + database)
+**Deploy** — Vercel (frontend), Fly.io (api + worker), Timescale Cloud or Crunchy Bridge (Postgres + TimescaleDB), Upstash (Redis)
 
 **Observability** — Sentry, Langfuse, pytest
 
@@ -268,23 +268,28 @@ make train-ranking  # Fetch Coinbase history + fit the crypto RankingModel artif
 For the full production deploy, webhook setup, migrations, load testing, and
 launch checklist, see [DEPLOY.md](./DEPLOY.md). Quick commands below.
 
-### Backend (Railway)
+### Backend (Fly.io)
 
 ```bash
-# Install Railway CLI
-npm install -g @railway/cli
+# Install Fly CLI
+curl -L https://fly.io/install.sh | sh
+fly auth login
 
-# Link project and deploy
-railway login
-railway link
-railway up
+# Provision two apps from their fly.toml files
+cd apps/api    && fly launch --copy-config --no-deploy --name sigma-api    && cd ../..
+cd apps/worker && fly launch --copy-config --no-deploy --name sigma-worker && cd ../..
+
+# Secrets (INTERNAL_SECRET, CLERK_*, STRIPE_*, COINBASE_*, DATABASE_URL, REDIS_URL)
+fly secrets set -a sigma-api    DATABASE_URL=... REDIS_URL=... INTERNAL_SECRET=...
+fly secrets set -a sigma-worker DATABASE_URL=... REDIS_URL=... INTERNAL_SECRET=... \
+                                 COINBASE_API_KEY_NAME=... COINBASE_PRIVATE_KEY=...
+
+# Deploy
+cd apps/api && fly deploy
+fly deploy -a sigma-worker --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile .
 ```
 
-Railway auto-injects `DATABASE_URL` and `REDIS_URL` when services are attached. Set all other env vars via the Railway dashboard or:
-
-```bash
-railway variables set --from-env apps/api/.env
-```
+Postgres + Redis live with separate providers — Timescale Cloud or Crunchy Bridge for the timescaledb-extended Postgres (vanilla Fly Postgres doesn't ship the extension), Upstash for Redis. Full step-by-step in [DEPLOY.md](DEPLOY.md).
 
 ### Frontend (Vercel)
 

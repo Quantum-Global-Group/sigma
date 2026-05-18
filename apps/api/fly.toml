@@ -1,0 +1,56 @@
+# SIGMA API — Fly.io deployment
+#
+# Companion to apps/api/Dockerfile. Builds the FastAPI image, runs it as a
+# public service on the Fly internal port 8000, exposes it via Fly's edge
+# proxy on :80 / :443 with auto-issued certs.
+#
+# Provision once:
+#   fly launch --copy-config --no-deploy --org <your-org> --name sigma-api
+#   fly secrets set INTERNAL_SECRET=... CLERK_SECRET_KEY=... STRIPE_SECRET_KEY=... \
+#                   HUGGINGFACE_TOKEN=... SENTRY_DSN=... LANGFUSE_PUBLIC_KEY=... \
+#                   LANGFUSE_SECRET_KEY=...
+#   fly postgres create --name sigma-pg --region ord       # or attach existing
+#   fly postgres attach sigma-pg                            # sets DATABASE_URL
+#   fly redis create --name sigma-redis                     # or use Upstash
+# Deploy:
+#   fly deploy
+
+app = "sigma-api"
+primary_region = "ord"
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ENVIRONMENT = "production"
+  API_PORT = "8000"
+  # DATABASE_URL, REDIS_URL, and all secret-bearing vars come from `fly secrets`
+  # — never put credentials in this file.
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "off"      # keep at least one machine warm for cached signals
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 400
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+# Single small VM is plenty for the alpha. Bump to shared-cpu-2x if request
+# rate climbs.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

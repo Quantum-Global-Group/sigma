@@ -70,17 +70,20 @@ Cleanup that's already done:
 
 | # | Task | Notes | Est |
 |---|---|---|---|
-| 1 | Provision Railway project for sigma | API + worker as separate services, Postgres+Timescale + Redis attached | 3h |
-| 2 | Set production env vars on Railway | `INTERNAL_SECRET`, `EXECUTOR_MODE=paper`, `WORKER_ASSET_CLASSES=crypto`, `SENTRY_DSN`, `LANGFUSE_*`, `HUGGINGFACE_TOKEN` | 1h |
-| 3 | Run migrations 001–006 against Railway postgres | One-shot script, document in `DEPLOY.md` | 1h |
-| 4 | `make train-ranking` against Coinbase historical 5m candles | 30–60 days lookback, save `crypto_ranking_v1.0.pkl` | 3h |
-| 5 | Bundle the trained artifact into worker image | Either `COPY ml/saved_models/` (need .dockerignore tweak) or runtime download from S3 | 2h |
-| 6 | Worker comes up healthy on Railway | Smoke check: one tick produces orders + positions rows | 2h |
-| 7 | Sentry capturing worker tick exceptions | Currently only initialized on api `lifespan`; add to `apps/worker/main.py` | 2h |
-| 8 | Tiny CI workflow (`.github/workflows/test.yml`) | pytest on push, no deploy gate yet | 2h |
-| 9 | Sprint 1 retro note in this file | Honest about what went over scope | 0.5h |
+| 1 | Provision Fly.io apps (`sigma-api`, `sigma-worker`) | `fly launch --copy-config --no-deploy` for each. Region: `ord`. Single VM each. `fly.toml`s already live in `apps/{api,worker}/`. | 2h |
+| 2 | Provision Postgres + Redis | Timescale Cloud (free 30 days) or Crunchy Bridge for Postgres-with-timescaledb; Upstash for Redis | 1h |
+| 3 | Set production secrets on both Fly apps | `fly secrets set` — `INTERNAL_SECRET` (shared), `DATABASE_URL`, `REDIS_URL`, `EXECUTOR_MODE=paper`, `WORKER_ASSET_CLASSES=crypto`, `SENTRY_DSN`, `LANGFUSE_*`, `HUGGINGFACE_TOKEN` | 1h |
+| 4 | Run migrations 001–006 against the prod Postgres | psql from your laptop using the Fly secret, document in `DEPLOY.md` | 1h |
+| 5 | `make train-ranking` against Coinbase historical 5m candles | 30–60 days lookback, save `crypto_ranking_v1.0.pkl` | 3h |
+| 6 | Bundle the trained artifact into worker image | Either `COPY ml/saved_models/` (need .dockerignore tweak) or runtime download from S3 | 2h |
+| 7 | `fly deploy` both apps | `apps/api`: `fly deploy`; `apps/worker`: `fly deploy -a sigma-worker --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile .` | 1h |
+| 8 | Worker tail green: one healthy tick every interval | `fly logs -a sigma-worker`; smoke check that orders + positions rows appear | 2h |
+| 9 | Sentry capturing worker tick exceptions | Currently only initialized on api `lifespan`; add to `apps/worker/main.py` | 2h |
+| 10 | Sprint 1 retro note in this file | Honest about what went over scope | 0.5h |
 
 Sprint capacity: ~16h. Buffer: 4h.
+
+> The CI workflow that was originally listed as Sprint 1 work (`.github/workflows/ci.yml`) shipped in Sprint 0 as part of PR #3. Pytest + npm type-check run on every push and PR against `main`.
 
 ### Sprint 2 — Observability + review cadence (2 weeks)
 

@@ -30,7 +30,8 @@ from config import settings
 from db.connection import AsyncSessionLocal
 from db.models import ExitState, Order, Position, SignalHistory
 from execution import get_executor
-from execution.base import OrderRequest
+from execution.base import ExecutionReport, OrderIntent, OrderType, Side, TimeInForce
+from execution.idempotency import already_submitted
 from markets import get_market_adapter
 from ml.sequences import FeatureEngineer
 from ml.strategies import build_default_combiner, combine_to_result
@@ -91,7 +92,7 @@ async def tick_once(asset_class: str, equity: float = 10_000.0) -> None:
     symbols = selector.select()
     logger.info("[%s] tick: %d symbols", asset_class, len(symbols))
 
-    executor = get_executor()
+    executor = get_executor(asset_class)
     combiner = build_default_combiner()
     fe = FeatureEngineer()
     sizer = PositionSizer(equity)
@@ -145,6 +146,7 @@ async def _process_symbol(
 
     feats = fe.compute(df)
     px_now = float(feats["c"].iloc[-1])
+    signal_ts = _last_bar_ts(feats)
 
     # 1. Exit check on any existing position before new entries.
     if open_position is not None:
@@ -160,6 +162,7 @@ async def _process_symbol(
             px_now=px_now,
             executor=executor,
             exit_state=exit_state,
+            signal_ts=signal_ts,
         )
 
     # 2. Combiner -> SignalResult, persist signal_history row.
@@ -197,40 +200,30 @@ async def _process_symbol(
         logger.info("[%s] %s sizer returned zero qty", asset_class, symbol)
         return
 
-    side = "buy" if result.signal == "BUY" else "sell"
-    order_req = OrderRequest(
+    side = Side.BUY if result.signal == "BUY" else Side.SELL
+    intent = OrderIntent(
         asset_class=asset_class,
         symbol=symbol,
         side=side,
+        order_type=OrderType.MARKET,
         qty=sized.qty,
-        limit_px=px_now,
+        limit_px=px_now,  # reference price for paper/slippage + idempotency context
+        time_in_force=TimeInForce.DAY,
+        signal_time=signal_ts,
+        client_order_id=_client_order_id(asset_class, symbol, side.value, signal_ts),
     )
-    fill = await executor.place(order_req)
-    if fill.qty <= 0:
+
+    report, affected = await _submit_and_persist(session, executor, intent, open_position)
+    if report is None:
+        return  # idempotent skip — already submitted this bar
+    if report.filled_qty <= 0:
         logger.info("[%s] %s zero-fill", asset_class, symbol)
         return
 
-    session.add(Order(
-        asset_class=fill.asset_class,
-        symbol=fill.symbol,
-        ts=fill.ts,
-        side=fill.side,
-        qty=fill.qty,
-        px=fill.px,
-        fee=fill.fee,
-        slippage_bps=fill.slippage_bps,
-        executor=fill.executor,
-        external_id=fill.external_id,
-        status="filled",
-        raw=fill.raw,
-    ))
-    new_or_existing = await _apply_fill_to_position(session, fill, open_position)
-    # If we just opened a position, seed an ExitState row for it so the next
-    # tick can immediately ratchet trailing stops.
-    if fill.side == "buy" and new_or_existing is not None and not new_or_existing.closed:
-        await _ensure_exit_state(session, new_or_existing.id, seed_high_water=fill.px)
-    if fill.side == "sell":
-        recent_sells[symbol] = fill.ts
+    if side == Side.BUY and affected is not None and not affected.closed:
+        await _ensure_exit_state(session, affected.id, seed_high_water=float(affected.entry_px))
+    if side == Side.SELL:
+        recent_sells[symbol] = datetime.now(timezone.utc)
 
 
 async def _maybe_exit(
@@ -241,6 +234,7 @@ async def _maybe_exit(
     px_now: float,
     executor,
     exit_state: dict,
+    signal_ts,
 ) -> None:
     """Run advanced (or basic) exit logic. Place SELLs, update state."""
     qty = float(position.qty)
@@ -284,41 +278,28 @@ async def _maybe_exit(
         merged_state = exit_state
 
     # razorBill exits emit ("sell", qty) tuples
-    for raw in orders:
+    for i, raw in enumerate(orders):
         if isinstance(raw, tuple) and len(raw) >= 2:
-            side, sell_qty = str(raw[0]), float(raw[1])
+            _side, sell_qty = str(raw[0]), float(raw[1])
         elif isinstance(raw, dict):
-            side = str(raw.get("side", "sell"))
+            _side = str(raw.get("side", "sell"))
             sell_qty = float(raw.get("qty", qty))
         else:
             continue
         if sell_qty <= 0:
             continue
-        order_req = OrderRequest(
+        intent = OrderIntent(
             asset_class=position.asset_class,
             symbol=position.symbol,
-            side=side,
+            side=Side.SELL,
+            order_type=OrderType.MARKET,
             qty=sell_qty,
             limit_px=px_now,
+            time_in_force=TimeInForce.DAY,
+            signal_time=signal_ts,
+            client_order_id=_client_order_id(position.asset_class, position.symbol, f"exit{i}", signal_ts),
         )
-        fill = await executor.place(order_req)
-        if fill.qty <= 0:
-            continue
-        session.add(Order(
-            asset_class=fill.asset_class,
-            symbol=fill.symbol,
-            ts=fill.ts,
-            side=fill.side,
-            qty=fill.qty,
-            px=fill.px,
-            fee=fill.fee,
-            slippage_bps=fill.slippage_bps,
-            executor=fill.executor,
-            external_id=fill.external_id,
-            status="filled",
-            raw=fill.raw,
-        ))
-        await _apply_fill_to_position(session, fill, position)
+        await _submit_and_persist(session, executor, intent, position)
 
     # Persist the (possibly updated) ExitState row.
     await _persist_exit_state(session, position.id, merged_state)
@@ -394,49 +375,127 @@ def _in_cooldown(symbol: str, recent_sells: dict[str, datetime]) -> bool:
     return age < settings.rebuy_cooldown_min
 
 
+async def _submit_and_persist(
+    session: AsyncSession,
+    executor,
+    intent: OrderIntent,
+    position: Optional[Position],
+) -> tuple[Optional[ExecutionReport], Optional[Position]]:
+    """Idempotency-check, submit, persist one Order row per intent, and apply
+    the aggregate fill to the position. Returns (report, affected_position).
+    Returns (None, position) when the intent was already submitted this bar."""
+    if intent.client_order_id:
+        existing = await already_submitted(session, intent.client_order_id)
+        if existing is not None:
+            logger.info(
+                "[%s] %s idempotent skip (client_order_id=%s)",
+                intent.asset_class, intent.symbol, intent.client_order_id,
+            )
+            return None, position
+
+    report = await executor.place(intent)
+    filled_qty = report.filled_qty
+    avg_px = report.avg_fill_price or intent.limit_px or 0.0
+    fee = sum(f.commission for f in report.fills)
+    slippage_bps = next((f.slippage_bps for f in report.fills if f.slippage_bps is not None), None)
+
+    session.add(Order(
+        asset_class=intent.asset_class,
+        symbol=intent.symbol,
+        ts=datetime.now(timezone.utc),
+        side=intent.side.value,
+        qty=filled_qty,
+        px=avg_px,
+        fee=fee,
+        slippage_bps=slippage_bps,
+        executor=getattr(executor, "name", "unknown"),
+        external_id=report.order.order_id,
+        client_order_id=intent.client_order_id,
+        order_type=intent.order_type.value,
+        time_in_force=intent.time_in_force.value,
+        limit_px=intent.limit_px,
+        stop_px=intent.stop_px,
+        status=report.order.status.value,
+        raw=(report.fills[0].metadata if report.fills else None),
+    ))
+
+    if filled_qty <= 0:
+        return report, position
+
+    affected = await _apply_fill_to_position(
+        session,
+        asset_class=intent.asset_class,
+        symbol=intent.symbol,
+        side=intent.side,
+        qty=filled_qty,
+        price=avg_px,
+        existing=position,
+    )
+    return report, affected
+
+
 async def _apply_fill_to_position(
     session: AsyncSession,
-    fill,
+    *,
+    asset_class: str,
+    symbol: str,
+    side: Side,
+    qty: float,
+    price: float,
     existing: Optional[Position],
 ) -> Optional[Position]:
-    """Mutate Position to reflect the fill. Returns the affected Position
-    (newly opened or existing) so callers can wire up dependent rows."""
-    if fill.side == "buy":
+    """Mutate Position to reflect an aggregate fill. Returns the affected
+    Position (newly opened or existing) so callers can seed dependent rows."""
+    now = datetime.now(timezone.utc)
+    if side == Side.BUY:
         if existing is None or existing.closed:
             new_pos = Position(
-                asset_class=fill.asset_class,
-                symbol=fill.symbol,
-                qty=fill.qty,
-                entry_px=fill.px,
-                entry_ts=fill.ts,
-                current_px=fill.px,
+                asset_class=asset_class,
+                symbol=symbol,
+                qty=qty,
+                entry_px=price,
+                entry_ts=now,
+                current_px=price,
             )
             session.add(new_pos)
             await session.flush()  # populates new_pos.id for ExitState seeding
             return new_pos
-        new_qty = float(existing.qty) + fill.qty
+        new_qty = float(existing.qty) + qty
         existing.entry_px = (
-            float(existing.entry_px) * float(existing.qty) + fill.px * fill.qty
+            float(existing.entry_px) * float(existing.qty) + price * qty
         ) / max(new_qty, 1e-12)
         existing.qty = new_qty
-        existing.current_px = fill.px
-        existing.updated_at = datetime.now(timezone.utc)
+        existing.current_px = price
+        existing.updated_at = now
         return existing
 
     # sell
     if existing is None:
         return None
-    remaining = float(existing.qty) - fill.qty
-    realized_delta = (fill.px - float(existing.entry_px)) * fill.qty
-    existing.realized_pnl = float(existing.realized_pnl) + realized_delta
+    remaining = float(existing.qty) - qty
+    existing.realized_pnl = float(existing.realized_pnl) + (price - float(existing.entry_px)) * qty
     if remaining <= 1e-9:
         existing.qty = 0.0
         existing.closed = True
-        existing.closed_at = datetime.now(timezone.utc)
+        existing.closed_at = now
     else:
         existing.qty = remaining
-        existing.current_px = fill.px
+        existing.current_px = price
     return existing
+
+
+def _client_order_id(asset_class: str, symbol: str, tag: str, signal_ts) -> str:
+    """Deterministic idempotency key: collapses retries within the same bar to
+    one order, but a new bar (new signal_ts) yields a new key."""
+    bucket = int(pd.Timestamp(signal_ts).timestamp()) if signal_ts is not None else 0
+    return f"{asset_class}:{symbol}:{tag}:{bucket}"
+
+
+def _last_bar_ts(feats: pd.DataFrame):
+    try:
+        return feats.index[-1]
+    except Exception:
+        return None
 
 
 def _default_timeframe(asset_class: str) -> str:

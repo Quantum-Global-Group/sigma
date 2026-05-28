@@ -1,22 +1,27 @@
 """Paper executor — simulated fills with size-aware slippage, fees, latency,
-and partial-fill modeling.
+and partial-fill modeling. Fills immediately (synchronous).
 
-Body ported from razorBill `execution.py::PaperExecutor`. Adapted to sigma's
-`Executor.place(OrderRequest) -> Fill` interface — razorBill's
-`market_order(symbol, side, qty, px)` becomes `place(OrderRequest)` where
-`limit_px` carries the market reference price."""
+Upgraded to the OrderIntent -> ExecutionReport contract."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import random
-import uuid
 from datetime import datetime, timezone
 
 from config import settings
 
-from .base import Executor, Fill, OrderRequest
+from .base import (
+    Executor,
+    ExecutionReport,
+    Fill,
+    Order,
+    OrderIntent,
+    OrderStatus,
+    Side,
+    new_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,22 +29,32 @@ logger = logging.getLogger(__name__)
 class PaperExecutor(Executor):
     name = "paper"
 
-    async def place(self, order: OrderRequest) -> Fill:
-        ref_px = order.limit_px
+    async def place(self, intent: OrderIntent) -> ExecutionReport:
+        ref_px = intent.limit_px
         if ref_px is None or ref_px <= 0:
             raise ValueError(
-                "PaperExecutor requires a reference price via OrderRequest.limit_px "
+                "PaperExecutor requires a reference price via OrderIntent.limit_px "
                 "(use the latest candle close)."
             )
-        if order.qty <= 0:
-            return _zero_fill(order, ref_px, self.name)
 
-        slippage_bps = self._calculate_slippage_bps(ref_px, order.qty)
+        order = Order(
+            order_id=new_id("paper"),
+            intent=intent,
+            submitted_at=datetime.now(timezone.utc),
+        )
+
+        qty = intent.qty or 0.0
+        if qty <= 0:
+            order.status = OrderStatus.REJECTED
+            order.rejected_reason = "qty <= 0"
+            return ExecutionReport(order=order, fills=[])
+
+        slippage_bps = self._calculate_slippage_bps(ref_px, qty)
         slip_px = ref_px * (slippage_bps / 10_000.0)
-        exec_px = ref_px + slip_px if order.side == "buy" else ref_px - slip_px
+        exec_px = ref_px + slip_px if intent.side == Side.BUY else ref_px - slip_px
 
-        notional = order.qty * exec_px
-        fee_bps = settings.maker_fee_bps if order.side == "buy" else settings.taker_fee_bps
+        fee_bps = settings.maker_fee_bps if intent.side == Side.BUY else settings.taker_fee_bps
+        notional = qty * exec_px
         fee = notional * (fee_bps / 10_000.0)
 
         await _maybe_sleep(_total_latency_ms())
@@ -47,25 +62,33 @@ class PaperExecutor(Executor):
         fill_pct = settings.partial_fill_pct
         if 0 < fill_pct < 1.0:
             fill_pct = random.uniform(fill_pct, 1.0)
-        final_qty = order.qty * fill_pct
+        final_qty = qty * fill_pct
 
+        now = datetime.now(timezone.utc)
         fill = Fill(
-            asset_class=order.asset_class,
-            symbol=order.symbol,
-            ts=datetime.now(timezone.utc),
-            side=order.side,
+            fill_id=new_id("fill"),
+            order_id=order.order_id,
+            asset_class=intent.asset_class,
+            symbol=intent.symbol,
+            side=intent.side,
             qty=final_qty,
-            px=exec_px,
-            fee=fee,
+            price=exec_px,
+            timestamp=now,
+            commission=fee,
             slippage_bps=float(slippage_bps),
             executor=self.name,
-            external_id=f"paper-{uuid.uuid4().hex[:12]}",
+            external_id=order.order_id,
         )
+        order.status = OrderStatus.FILLED
+        order.filled_qty = final_qty
+        order.avg_fill_price = exec_px
+        order.updated_at = now
+
         logger.info(
             "[paper] %s %.6f %s @ %.4f (fee=%.2f, slip_bps=%.1f)",
-            order.side, final_qty, order.symbol, exec_px, fee, slippage_bps,
+            intent.side.value, final_qty, intent.symbol, exec_px, fee, slippage_bps,
         )
-        return fill
+        return ExecutionReport(order=order, fills=[fill])
 
     def _calculate_slippage_bps(self, px: float, qty: float) -> float:
         base = settings.base_slippage_bps
@@ -91,17 +114,3 @@ def _total_latency_ms() -> int:
 async def _maybe_sleep(ms: int) -> None:
     if ms > 0:
         await asyncio.sleep(ms / 1000.0)
-
-
-def _zero_fill(order: OrderRequest, ref_px: float, executor_name: str) -> Fill:
-    return Fill(
-        asset_class=order.asset_class,
-        symbol=order.symbol,
-        ts=datetime.now(timezone.utc),
-        side=order.side,
-        qty=0.0,
-        px=ref_px,
-        fee=0.0,
-        slippage_bps=0.0,
-        executor=executor_name,
-    )

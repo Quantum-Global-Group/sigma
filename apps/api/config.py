@@ -68,8 +68,28 @@ class Settings(BaseSettings):
     lx_model_url: str = "http://127.0.0.1:11434"
     langextract_api_key: str = ""
 
+    # Execution — per-asset-class executor selection
+    #   crypto → coinbase | paper
+    #   equity → alpaca   | paper
+    crypto_executor: str = "paper"
+    equity_executor: str = "paper"
+    # Deprecated global toggle, kept as a fallback for older deploys. If set to
+    # something other than "paper", it overrides the per-asset default for that
+    # venue. New config should use crypto_executor / equity_executor.
+    executor_mode: str = "paper"  # paper | coinbase (legacy)
+
+    # Execution — Alpaca (equities), via the modern alpaca-py SDK
+    alpaca_api_key: str = ""
+    alpaca_secret: str = ""
+    alpaca_paper: bool = True
+    alpaca_allow_live: bool = False        # hard guardrail: live needs this true
+    alpaca_data_feed: str = "iex"          # iex (free) | sip (paid)
+    alpaca_order_timeout_seconds: int = 20
+    alpaca_allow_fractional: bool = True
+    alpaca_max_order_notional: float = 0.0  # 0 disables the cap
+    alpaca_max_order_shares: float = 0.0    # 0 disables the cap
+
     # Execution — Coinbase Advanced Trade
-    executor_mode: str = "paper"  # paper | coinbase
     coinbase_api_key_name: str = ""
     coinbase_private_key: str = ""
     coinbase_sandbox: bool = True

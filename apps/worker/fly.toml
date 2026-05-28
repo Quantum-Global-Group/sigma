@@ -29,12 +29,16 @@ kill_timeout = "60s"  # let the current tick finish before stopping
 
 [env]
   ENVIRONMENT = "production"
-  WORKER_ASSET_CLASSES = "crypto"
-  EXECUTOR_MODE = "paper"           # flip to "coinbase" when ready
+  WORKER_ASSET_CLASSES = "crypto"   # add "equity" once Alpaca secrets are set
+  CRYPTO_EXECUTOR = "paper"         # flip to "coinbase" when ready
+  EQUITY_EXECUTOR = "paper"         # flip to "alpaca" when ready
   WORKER_TICK_SECONDS_CRYPTO = "300"
+  WORKER_TICK_SECONDS_EQUITY = "900"
   SENTIMENT_PROVIDER = "finbert"
-  # All other vars (DATABASE_URL, REDIS_URL, COINBASE_*, INTERNAL_SECRET, etc.)
-  # come from `fly secrets`.
+  ALPACA_PAPER = "true"
+  ALPACA_ALLOW_LIVE = "false"
+  # Secret-bearing vars (DATABASE_URL, REDIS_URL, INTERNAL_SECRET, COINBASE_*,
+  # ALPACA_API_KEY, ALPACA_SECRET) come from `fly secrets`.
 
 # CRITICAL: single instance only. Two workers race on positions + orders.
 [deploy]

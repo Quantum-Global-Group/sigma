@@ -17,19 +17,31 @@ from ml.inference import SignalResult
 
 from .base import BaseStrategy, Signal
 from .breakout import BreakoutStrategy
+from .fourier import FourierStrategy
+from .ict import ICTStrategy
+from .macd import MacdStrategy
 from .mean_reversion import MeanReversionStrategy
 from .ml import MLStrategy
 from .momentum import MomentumStrategy
 from .regime import RegimeStrategy
+from .sde import GbmStrategy, HestonVolStrategy, OuMeanReversionStrategy
 
 logger = logging.getLogger(__name__)
 
 _STRATEGY_FACTORIES: dict[str, type[BaseStrategy]] = {
+    # razorBill-derived (defaults)
     "momentum": MomentumStrategy,
     "mean_reversion": MeanReversionStrategy,
     "breakout": BreakoutStrategy,
     "regime": RegimeStrategy,
     "ml": MLStrategy,
+    # tradeFlux-derived (opt in via settings.enabled_strategies)
+    "macd": MacdStrategy,
+    "fourier": FourierStrategy,
+    "gbm": GbmStrategy,
+    "ou": OuMeanReversionStrategy,
+    "heston": HestonVolStrategy,
+    "ict": ICTStrategy,
 }
 
 

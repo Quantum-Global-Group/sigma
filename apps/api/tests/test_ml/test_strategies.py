@@ -7,9 +7,15 @@ import pandas as pd
 
 from ml.strategies import (
     BreakoutStrategy,
+    FourierStrategy,
+    GbmStrategy,
+    HestonVolStrategy,
+    ICTStrategy,
+    MacdStrategy,
     MeanReversionStrategy,
     MLStrategy,
     MomentumStrategy,
+    OuMeanReversionStrategy,
     RegimeStrategy,
     Signal,
     StrategyCombiner,
@@ -117,3 +123,85 @@ def test_combine_to_result_translates_signal():
 def test_combine_to_result_holds_in_threshold_band():
     sig = Signal(strength=0.05, confidence=0.5, method="combined")
     assert combine_to_result(sig).signal == "HOLD"
+
+
+# ─── tradeFlux-derived strategies (Phase 2) ───────────────────────────────────
+
+def _long_ohlcv(n: int = 120, trend: float = 0.0):
+    """Longer window for strategies that need 60–64+ bars."""
+    rng = np.random.default_rng(7)
+    rets = rng.normal(trend, 0.01, n)
+    closes = 100 * np.exp(np.cumsum(rets))
+    df = pd.DataFrame({
+        "o": closes * (1 + rng.normal(0, 0.001, n)),
+        "h": closes * (1 + rng.uniform(0, 0.004, n)),
+        "l": closes * (1 - rng.uniform(0, 0.004, n)),
+        "c": closes,
+        "v": rng.uniform(1e6, 5e6, n),
+    })
+    return df, float(closes[-1])
+
+
+def _valid(sig: Signal, name: str):
+    assert isinstance(sig, Signal)
+    assert sig.method == name
+    assert -1.0 <= sig.strength <= 1.0
+    assert 0.0 <= sig.confidence <= 1.0
+
+
+def test_macd_strategy():
+    df, px = _long_ohlcv(120, trend=0.002)
+    _valid(MacdStrategy().generate_signal("AAPL", df, px), "macd")
+
+
+def test_macd_too_short_returns_flat():
+    df, px = _long_ohlcv(20)
+    sig = MacdStrategy().generate_signal("AAPL", df, px)
+    assert sig.strength == 0.0 and sig.confidence == 0.0
+
+
+def test_fourier_strategy():
+    df, px = _long_ohlcv(120)
+    _valid(FourierStrategy().generate_signal("AAPL", df, px), "fourier")
+
+
+def test_fourier_too_short_returns_flat():
+    df, px = _long_ohlcv(40)
+    assert FourierStrategy().generate_signal("AAPL", df, px).strength == 0.0
+
+
+def test_gbm_strategy():
+    df, px = _long_ohlcv(120, trend=0.003)
+    _valid(GbmStrategy().generate_signal("AAPL", df, px), "gbm")
+
+
+def test_ou_strategy():
+    df, px = _long_ohlcv(120)
+    _valid(OuMeanReversionStrategy().generate_signal("AAPL", df, px), "ou")
+
+
+def test_heston_strategy():
+    df, px = _long_ohlcv(120)
+    _valid(HestonVolStrategy().generate_signal("AAPL", df, px), "heston")
+
+
+def test_ict_strategy():
+    df, px = _long_ohlcv(120)
+    _valid(ICTStrategy().generate_signal("AAPL", df, px), "ict")
+
+
+def test_new_strategies_registered_in_factory():
+    from ml.strategies.combiner import _STRATEGY_FACTORIES
+    for name in ("macd", "fourier", "gbm", "ou", "heston", "ict"):
+        assert name in _STRATEGY_FACTORIES
+
+
+def test_combiner_runs_with_a_tradeflux_strategy():
+    df, px = _long_ohlcv(120, trend=0.002)
+    combiner = StrategyCombiner(
+        strategies={"macd": MacdStrategy(), "gbm": GbmStrategy()},
+        weights={"macd": 0.5, "gbm": 0.5},
+    )
+    combined = combiner.combine_signals("AAPL", df, px)
+    assert combined.method == "combined"
+    assert -1.0 <= combined.strength <= 1.0

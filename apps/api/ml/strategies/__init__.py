@@ -10,10 +10,14 @@ from __future__ import annotations
 from .base import BaseStrategy, Signal
 from .breakout import BreakoutStrategy
 from .combiner import StrategyCombiner, build_default_combiner, combine_to_result
+from .fourier import FourierStrategy
+from .ict import ICTStrategy
+from .macd import MacdStrategy
 from .mean_reversion import MeanReversionStrategy
 from .ml import MLStrategy
 from .momentum import MomentumStrategy
 from .regime import RegimeStrategy
+from .sde import GbmStrategy, HestonVolStrategy, OuMeanReversionStrategy
 
 __all__ = [
     "BaseStrategy",
@@ -23,6 +27,13 @@ __all__ = [
     "BreakoutStrategy",
     "RegimeStrategy",
     "MLStrategy",
+    # tradeFlux-derived
+    "MacdStrategy",
+    "FourierStrategy",
+    "GbmStrategy",
+    "OuMeanReversionStrategy",
+    "HestonVolStrategy",
+    "ICTStrategy",
     "StrategyCombiner",
     "build_default_combiner",
     "combine_to_result",

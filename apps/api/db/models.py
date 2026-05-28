@@ -119,6 +119,11 @@ class Order(Base):
     slippage_bps: Mapped[float | None] = mapped_column(Numeric(10, 4))
     executor: Mapped[str] = mapped_column(String(32), nullable=False)
     external_id: Mapped[str | None] = mapped_column(String(128))
+    client_order_id: Mapped[str | None] = mapped_column(String(64), unique=True)
+    order_type: Mapped[str] = mapped_column(String(16), nullable=False, default="market")
+    time_in_force: Mapped[str] = mapped_column(String(8), nullable=False, default="day")
+    limit_px: Mapped[float | None] = mapped_column(Numeric(20, 8))
+    stop_px: Mapped[float | None] = mapped_column(Numeric(20, 8))
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="filled")
     raw: Mapped[dict | None] = mapped_column(JSONB)
 

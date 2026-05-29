@@ -125,8 +125,12 @@ class TestPredict:
         assert result.confidence == 0.5
 
     def test_oversold_rsi_biases_buy(self):
+        # Force the heuristic path: with a trained ensemble committed under
+        # saved_models/, resolve('equity') would otherwise classify these
+        # hand-crafted features per the model weights, defeating the intent.
         features = pd.DataFrame([{"rsi_14": 20.0, "roc_10": 0.0, "ema_20": 100.0, "ema_50": 98.0, "ema_ratio": 1.02, "bb_width": 0.03, "atr_14": 1.0, "volume_ratio": 1.0, "ret_1d": 0.001, "ret_5d": 0.01}])
-        result = predict(features)
+        with patch("ml.models.registry.resolve", return_value=None):
+            result = predict(features)
         assert result.signal in ("BUY", "HOLD")
 
     def test_overbought_rsi_biases_sell(self):

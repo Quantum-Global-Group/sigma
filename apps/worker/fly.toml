@@ -37,6 +37,11 @@ kill_timeout = "60s"  # let the current tick finish before stopping
   SENTIMENT_PROVIDER = "finbert"
   ALPACA_PAPER = "true"
   ALPACA_ALLOW_LIVE = "false"
+  # The worker image copies apps/api to /app/api (CMD runs from /app), so the
+  # bundled model artifact lives at /app/api/ml/saved_models — point MODEL_DIR
+  # there explicitly. The default "./ml/saved_models" resolves to /app/ml/...
+  # (correct for the api image, which COPYs apps/api to /app, but not here).
+  MODEL_DIR = "/app/api/ml/saved_models"
   # Secret-bearing vars (DATABASE_URL, REDIS_URL, INTERNAL_SECRET, COINBASE_*,
   # ALPACA_API_KEY, ALPACA_SECRET) come from `fly secrets`.
 

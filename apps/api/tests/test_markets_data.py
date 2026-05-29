@@ -76,6 +76,37 @@ def test_tiingo_no_key_returns_none(monkeypatch):
     assert equity_data.fetch_tiingo("AAPL", "daily") is None
 
 
+def test_tiingo_daily_prefers_adjusted_and_dedups(monkeypatch):
+    """Tiingo daily returns raw AND adjusted columns; we must keep a single,
+    adjusted OHLCV set (regression for the duplicate-`close` bug)."""
+    monkeypatch.setattr("config.settings.tiingo_api_key", "k")
+    rows = [
+        {"date": "2024-01-01T00:00:00.000Z",
+         "open": 10, "high": 11, "low": 9, "close": 10.5, "volume": 100,
+         "adjOpen": 5, "adjHigh": 5.5, "adjLow": 4.5, "adjClose": 5.25, "adjVolume": 200},
+        {"date": "2024-01-02T00:00:00.000Z",
+         "open": 11, "high": 12, "low": 10, "close": 11.5, "volume": 110,
+         "adjOpen": 5.5, "adjHigh": 6, "adjLow": 5, "adjClose": 5.75, "adjVolume": 220},
+    ]
+
+    class _Resp:
+        def raise_for_status(self): pass
+        def json(self): return rows
+
+    class _Client:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get(self, *a, **k): return _Resp()
+
+    monkeypatch.setattr("httpx.Client", lambda *a, **k: _Client())
+    df = equity_data.fetch_tiingo("AAPL", "daily")
+    assert list(df.columns) == ["open", "high", "low", "close", "volume"]
+    assert list(df.columns).count("close") == 1
+    # adjusted values were chosen, not the raw ones
+    assert df["close"].iloc[-1] == pytest.approx(5.75)
+    assert df["volume"].iloc[0] == pytest.approx(200)
+
+
 def test_alpaca_no_creds_returns_none(monkeypatch):
     monkeypatch.setattr("config.settings.alpaca_api_key", "")
     monkeypatch.setattr("config.settings.alpaca_secret", "")

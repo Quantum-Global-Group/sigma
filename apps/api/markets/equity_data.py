@@ -64,7 +64,7 @@ def fetch_tiingo(symbol: str, timeframe: str) -> pd.DataFrame | None:
         return None
 
     lookback = _LOOKBACK.get(timeframe, timedelta(days=180))
-    start = (pd.Timestamp.utcnow() - lookback).strftime("%Y-%m-%d")
+    start = (pd.Timestamp.now("UTC") - lookback).strftime("%Y-%m-%d")
     headers = {"Content-Type": "application/json",
                "Authorization": f"Token {settings.tiingo_api_key}"}
 
@@ -93,14 +93,14 @@ def fetch_tiingo(symbol: str, timeframe: str) -> pd.DataFrame | None:
         return None
     df["date"] = pd.to_datetime(df["date"], utc=True)
     df = df.set_index("date")
-    # Prefer split/dividend-adjusted columns when present (daily endpoint).
-    if daily and {"adjopen", "adjhigh", "adjlow", "adjclose", "adjvolume"}.issubset(
-        {c.lower() for c in df.columns}
-    ):
-        df = df.rename(columns={
-            "adjOpen": "open", "adjHigh": "high", "adjLow": "low",
-            "adjClose": "close", "adjVolume": "volume",
-        })
+    # Tiingo's daily endpoint returns BOTH raw (open/high/low/close/volume) and
+    # split/dividend-adjusted (adjOpen/…/adjVolume) columns. Prefer adjusted and
+    # select *only* those (renaming positionally) to avoid duplicate columns.
+    cols = {c.lower(): c for c in df.columns}
+    adj = ("adjopen", "adjhigh", "adjlow", "adjclose", "adjvolume")
+    if daily and all(a in cols for a in adj):
+        df = df[[cols[a] for a in adj]]
+        df.columns = ["open", "high", "low", "close", "volume"]
     return _finalize(df)
 
 
@@ -127,7 +127,7 @@ def fetch_alpaca(symbol: str, timeframe: str) -> pd.DataFrame | None:
     }.get(timeframe, TimeFrame.Day)
 
     lookback = _LOOKBACK.get(timeframe, timedelta(days=180))
-    start = pd.Timestamp.utcnow() - lookback
+    start = pd.Timestamp.now("UTC") - lookback
 
     try:
         client = StockHistoricalDataClient(settings.alpaca_api_key, settings.alpaca_secret)

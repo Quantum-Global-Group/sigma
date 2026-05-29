@@ -135,3 +135,11 @@ class Executor:
     async def place(self, intent: OrderIntent) -> ExecutionReport:
         """Submit an order intent and return an execution report."""
         raise NotImplementedError
+
+    async def get_account_equity(self) -> Optional[float]:
+        """Return the live account equity for position sizing, or None.
+
+        Venues backed by a real broker (Alpaca) override this to report the
+        actual balance. Paper/sim executors return None, so the worker falls
+        back to settings.default_equity."""
+        return None

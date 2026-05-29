@@ -22,8 +22,9 @@ docker-compose.override.yml
 .env.local
 .git/
 .github/
-_legacy_razorbill/
 
 # Saved models — bundle separately when training pipeline matures
 apps/api/ml/saved_models/*.pkl
 apps/api/ml/saved_models/*.pt
+# Re-include the equity ensemble so the worker image ships it
+!apps/api/ml/saved_models/ensemble_v1.0.pkl

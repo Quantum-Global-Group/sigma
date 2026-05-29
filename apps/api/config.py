@@ -84,6 +84,15 @@ class Settings(BaseSettings):
     alpaca_paper: bool = True
     alpaca_allow_live: bool = False        # hard guardrail: live needs this true
     alpaca_data_feed: str = "iex"          # iex (free) | sip (paid)
+
+    # Equity market data — multi-source with fallback. The EquityAdapter tries
+    # providers left-to-right, skipping any whose credentials are missing, and
+    # returns the first non-empty result. yfinance is the last-resort fallback.
+    #   tiingo → api.tiingo.com (needs tiingo_api_key)
+    #   alpaca → alpaca-py StockHistoricalDataClient (reuses alpaca creds + feed)
+    #   yfinance → free, least reliable
+    equity_data_providers: str = "tiingo,alpaca,yfinance"
+    tiingo_api_key: str = ""
     alpaca_order_timeout_seconds: int = 20
     alpaca_allow_fractional: bool = True
     alpaca_max_order_notional: float = 0.0  # 0 disables the cap
@@ -115,9 +124,21 @@ class Settings(BaseSettings):
     worker_tick_seconds_crypto: int = 300
     worker_tick_seconds_equity: int = 900
 
+    # Fallback sizing equity when the executor can't report a live balance
+    # (paper/sim venues). Alpaca reports its real account equity instead.
+    default_equity: float = 10_000.0
+
     # Strategy combiner (razorBill multi-strategy)
+    # Legacy global list — kept as a fallback when a per-asset list is empty.
     enabled_strategies: str = "momentum,mean_reversion,breakout,regime,ml"
     strategy_weights: str = "0.2,0.2,0.2,0.2,0.2"
+    # Per-asset-class strategy selection. SDE strategies (gbm/ou/heston) assume
+    # daily bars (dt=1/252) so they are equity-only; crypto runs 5m bars.
+    crypto_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier"
+    equity_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier,gbm,ou,heston,ict"
+    # Empty → combiner falls back to equal weights across the selected list.
+    crypto_strategy_weights: str = ""
+    equity_strategy_weights: str = ""
     min_signal_confidence: float = 0.3
     strategy: StrategyParams = StrategyParams()
 

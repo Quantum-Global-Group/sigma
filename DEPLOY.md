@@ -1,6 +1,6 @@
 # SIGMA — Deployment Runbook
 
-Manual-but-repeatable path from `localhost` to a public, billable production deployment. Pair this with [docs/03_ENV_VARS.md](docs/03_ENV_VARS.md) for the full env-var reference and [docs/ROADMAP.md](docs/ROADMAP.md) / [06_ROADMAP.md](06_ROADMAP.md) for the milestone + daily plans.
+Manual-but-repeatable path from `localhost` to a public, billable production deployment. Pair this with [docs/03_ENV_VARS.md](docs/03_ENV_VARS.md) for the full env-var reference and [docs/ROADMAP.md](docs/ROADMAP.md) for the milestone + sprint plan. For the equity (Alpaca paper) overlay see [docs/DEPLOY_EQUITY.md](docs/DEPLOY_EQUITY.md).
 
 ```mermaid
 flowchart LR
@@ -216,7 +216,7 @@ Open <http://localhost:8089>, dial up users until ~100 RPS sustained. Watch for:
 
 Never point the load test at production.
 
-## 11. Launch checklist (from 06_ROADMAP.md)
+## 11. Launch checklist (from docs/ROADMAP.md)
 
 - [ ] `GET /health` returns 200 from prod
 - [ ] `POST /signals` < 500ms cached / < 3s fresh

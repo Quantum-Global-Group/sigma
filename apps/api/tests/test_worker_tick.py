@@ -13,12 +13,14 @@ _worker = _api.parent / "worker"
 sys.path.insert(0, str(_api))
 sys.path.insert(0, str(_worker))
 
+import asyncio
 import pandas as pd
 import numpy as np
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
-from tick import _model_pred, _resolve_model
+from tick import _model_pred, _resolve_model, _resolve_equity, _place_with_retry, _is_transient
+from execution.base import ExecutionReport, Order, OrderIntent, OrderStatus, OrderType, Side, TimeInForce
 
 
 # ---------------------------------------------------------------------------
@@ -114,3 +116,102 @@ def test_model_pred_casts_to_float():
     fake.predict.return_value = MagicMock(predicted_return=np.float32(0.05))
     result = _model_pred(fake, "MSFT", _make_ohlcv())
     assert isinstance(result["MSFT"], float)
+
+
+# ---------------------------------------------------------------------------
+# _resolve_equity (A8)
+# ---------------------------------------------------------------------------
+
+def test_resolve_equity_prefers_explicit_arg():
+    ex = MagicMock()
+    ex.get_account_equity = AsyncMock(return_value=50_000.0)
+    assert asyncio.run(_resolve_equity(ex, 1234.0)) == 1234.0
+    ex.get_account_equity.assert_not_called()
+
+
+def test_resolve_equity_uses_live_balance():
+    ex = MagicMock()
+    ex.get_account_equity = AsyncMock(return_value=42_000.0)
+    assert asyncio.run(_resolve_equity(ex, None)) == 42_000.0
+
+
+def test_resolve_equity_falls_back_to_default(monkeypatch):
+    monkeypatch.setattr("config.settings.default_equity", 7777.0)
+    ex = MagicMock()
+    ex.get_account_equity = AsyncMock(return_value=None)
+    assert asyncio.run(_resolve_equity(ex, None)) == 7777.0
+
+
+def test_resolve_equity_default_on_error(monkeypatch):
+    monkeypatch.setattr("config.settings.default_equity", 9000.0)
+    ex = MagicMock()
+    ex.get_account_equity = AsyncMock(side_effect=RuntimeError("api down"))
+    assert asyncio.run(_resolve_equity(ex, None)) == 9000.0
+
+
+# ---------------------------------------------------------------------------
+# _place_with_retry + _is_transient (P1b)
+# ---------------------------------------------------------------------------
+
+def _intent() -> OrderIntent:
+    return OrderIntent(
+        asset_class="equity", symbol="AAPL", side=Side.BUY,
+        order_type=OrderType.MARKET, qty=1, limit_px=100.0,
+        time_in_force=TimeInForce.DAY, client_order_id="equity:AAPL:buy:1",
+    )
+
+
+def _report(status: OrderStatus, reason=None) -> ExecutionReport:
+    order = Order(order_id="x", intent=_intent(), status=status, rejected_reason=reason)
+    return ExecutionReport(order=order, fills=[])
+
+
+def test_is_transient_classification():
+    assert _is_transient("Connection timed out")
+    assert _is_transient("HTTP 503 Service Unavailable")
+    assert _is_transient("rate limit exceeded")
+    assert not _is_transient("insufficient buying power")
+    assert not _is_transient(None)
+
+
+def test_place_with_retry_returns_on_success(monkeypatch):
+    monkeypatch.setattr("config.settings.executor_max_retries", 2)
+    monkeypatch.setattr("config.settings.executor_retry_base_delay", 0.0)
+    ex = MagicMock()
+    ex.place = AsyncMock(return_value=_report(OrderStatus.FILLED))
+    report = asyncio.run(_place_with_retry(ex, _intent()))
+    assert report.order.status == OrderStatus.FILLED
+    assert ex.place.await_count == 1
+
+
+def test_place_with_retry_retries_transient_then_succeeds(monkeypatch):
+    monkeypatch.setattr("config.settings.executor_max_retries", 2)
+    monkeypatch.setattr("config.settings.executor_retry_base_delay", 0.0)
+    ex = MagicMock()
+    ex.place = AsyncMock(side_effect=[
+        _report(OrderStatus.REJECTED, "connection reset"),
+        _report(OrderStatus.FILLED),
+    ])
+    report = asyncio.run(_place_with_retry(ex, _intent()))
+    assert report.order.status == OrderStatus.FILLED
+    assert ex.place.await_count == 2
+
+
+def test_place_with_retry_no_retry_on_hard_reject(monkeypatch):
+    monkeypatch.setattr("config.settings.executor_max_retries", 3)
+    monkeypatch.setattr("config.settings.executor_retry_base_delay", 0.0)
+    ex = MagicMock()
+    ex.place = AsyncMock(return_value=_report(OrderStatus.REJECTED, "insufficient buying power"))
+    report = asyncio.run(_place_with_retry(ex, _intent()))
+    assert report.order.status == OrderStatus.REJECTED
+    assert ex.place.await_count == 1  # hard reject → no retry
+
+
+def test_place_with_retry_retries_on_raise_then_reraises(monkeypatch):
+    monkeypatch.setattr("config.settings.executor_max_retries", 2)
+    monkeypatch.setattr("config.settings.executor_retry_base_delay", 0.0)
+    ex = MagicMock()
+    ex.place = AsyncMock(side_effect=ConnectionError("boom"))
+    with pytest.raises(ConnectionError):
+        asyncio.run(_place_with_retry(ex, _intent()))
+    assert ex.place.await_count == 3  # initial + 2 retries

@@ -18,30 +18,34 @@ import asyncio
 import logging
 import os
 import signal
+import socket
 import sys
+import time
 from typing import Iterable
 
 # Ensure apps/api is on sys.path when running as a separate service container.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "api")))
 
 from config import settings  # noqa: E402
+from cache.worker_status import (  # noqa: E402
+    acquire_singleton,
+    refresh_singleton,
+    write_heartbeat,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("worker")
 
 
-async def tick_once(asset_class: str) -> None:
+async def _run_tick(asset_class: str) -> None:
     """One pass over the configured universe for `asset_class`.
 
-    Real implementation lives in worker.tick — this thin wrapper offloads
-    sync market-data fetches off the asyncio event loop and isolates
-    exception handling to the per-tick boundary."""
+    Thin indirection over worker.tick.tick_once. Exceptions propagate to the
+    caller (_drive), which records them in the heartbeat and logs them — so a
+    failed tick is both visible (Sentry) and observable (GET /health/worker)."""
     from worker.tick import tick_once as _tick
 
-    try:
-        await _tick(asset_class)
-    except Exception:
-        logger.exception("[%s] tick raised", asset_class)
+    await _tick(asset_class)
 
 
 def _interval_for(asset_class: str) -> int:
@@ -51,13 +55,40 @@ def _interval_for(asset_class: str) -> int:
 
 
 async def run_loop(asset_classes: Iterable[str], stop: asyncio.Event) -> None:
+    asset_classes = list(asset_classes)
+    instance_id = f"{socket.gethostname()}:{os.getpid()}"
+    lock_ttl = max((_interval_for(ac) for ac in asset_classes), default=900) * 3
+
+    # Singleton guard (belt-and-suspenders over fly.toml's single-instance
+    # config): two workers would race on positions and double-place orders.
+    if not await acquire_singleton(instance_id, lock_ttl):
+        logger.error("another worker holds the singleton lock — exiting")
+        return
+    logger.info("singleton lock acquired (%s)", instance_id)
+
     async def _drive(ac: str) -> None:
         interval = _interval_for(ac)
         while not stop.is_set():
+            t0 = time.monotonic()
+            err: str | None = None
             try:
-                await tick_once(ac)
-            except Exception:
+                await _run_tick(ac)
+            except Exception as exc:
+                err = f"{type(exc).__name__}: {exc}"
                 logger.exception("[%s] tick raised", ac)
+
+            await write_heartbeat(
+                ac,
+                duration_s=time.monotonic() - t0,
+                status="error" if err else "ok",
+                error=err,
+                ttl=interval * 4,
+            )
+            if not await refresh_singleton(instance_id, lock_ttl):
+                logger.error("lost singleton lock — stopping worker")
+                stop.set()
+                break
+
             try:
                 await asyncio.wait_for(stop.wait(), timeout=interval)
             except asyncio.TimeoutError:

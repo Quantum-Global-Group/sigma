@@ -18,4 +18,8 @@ def get_universe_selector(asset_class: str) -> UniverseSelector:
         # Lazy import — Coinbase HTTP fetch shouldn't block API boot.
         from .crypto_dynamic import DynamicCryptoUniverse
         return DynamicCryptoUniverse()
+    if asset_class == "option":
+        # The option universe is the set of *underlyings* to scan for option
+        # trades; reuse the static equity list until OptionUniverse lands (P6).
+        return StaticEquityUniverse()
     raise ValueError(f"Unknown asset_class: {asset_class!r}")

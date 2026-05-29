@@ -71,8 +71,10 @@ class Settings(BaseSettings):
     # Execution — per-asset-class executor selection
     #   crypto → coinbase | paper
     #   equity → alpaca   | paper
+    #   option → moomoo   | paper
     crypto_executor: str = "paper"
     equity_executor: str = "paper"
+    option_executor: str = "paper"
     # Deprecated global toggle, kept as a fallback for older deploys. If set to
     # something other than "paper", it overrides the per-asset default for that
     # venue. New config should use crypto_executor / equity_executor.
@@ -97,6 +99,16 @@ class Settings(BaseSettings):
     alpaca_allow_fractional: bool = True
     alpaca_max_order_notional: float = 0.0  # 0 disables the cap
     alpaca_max_order_shares: float = 0.0    # 0 disables the cap
+
+    # Execution + data — Moomoo (US equities & options) via the OpenD gateway.
+    # The moomoo/futu SDK connects to a local OpenD daemon, not a cloud REST API,
+    # so the options worker runs where OpenD is reachable (local/VPS lab first).
+    moomoo_host: str = "127.0.0.1"
+    moomoo_port: int = 11111
+    moomoo_trd_market: str = "US"          # TrdMarket.US
+    moomoo_security_firm: str = "FUTUINC"  # SecurityFirm.FUTUINC
+    moomoo_paper: bool = True
+    moomoo_allow_live: bool = False        # hard guardrail: live needs this true
 
     # Execution — Coinbase Advanced Trade
     coinbase_api_key_name: str = ""

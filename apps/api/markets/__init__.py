@@ -10,10 +10,14 @@ from __future__ import annotations
 from .base import MarketAdapter
 from .crypto import CoinbaseAdapter
 from .equity import EquityAdapter
+from .moomoo import MoomooAdapter
 
 _REGISTRY: dict[str, MarketAdapter] = {
     "equity": EquityAdapter(),
     "crypto": CoinbaseAdapter(),
+    # Underlying OHLCV for the option asset class (option chains live behind
+    # markets/options.py::OptionDataProvider, not this OHLCV adapter).
+    "option": MoomooAdapter(),
 }
 
 

@@ -71,7 +71,27 @@ def _parse_asset_classes() -> list[str]:
     return [ac.strip() for ac in raw.split(",") if ac.strip()]
 
 
+def _init_sentry() -> None:
+    """Capture worker-loop exceptions in Sentry (mirrors apps/api/main.py).
+
+    Without this the worker fails silently — a dead trading loop produces no
+    alert. No-op when SENTRY_DSN is unset (local/dev)."""
+    if not settings.sentry_dsn:
+        return
+    try:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            environment=settings.environment,
+            traces_sample_rate=0.2,
+        )
+        logger.info("Sentry initialized for worker (env=%s)", settings.environment)
+    except Exception:
+        logger.warning("Sentry init failed — continuing without it", exc_info=True)
+
+
 def main() -> None:
+    _init_sentry()
     asset_classes = _parse_asset_classes()
     if not asset_classes:
         logger.error("WORKER_ASSET_CLASSES is empty — nothing to do")

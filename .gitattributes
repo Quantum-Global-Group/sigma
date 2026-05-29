@@ -1,0 +1,35 @@
+# Normalize line endings: store everything as LF in the repo, regardless of
+# the OS that committed it. This stops the CRLF<->LF churn that was marking
+# ~120 files as modified on every git operation (Windows/WSL editors writing
+# CRLF against an LF repo).
+* text=auto eol=lf
+
+# Explicit LF for code / config / docs (belt-and-suspenders for *text=auto*).
+*.py    text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.jsx   text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.mdx   text eol=lf
+*.sql   text eol=lf
+*.toml  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.sh    text eol=lf
+*.env   text eol=lf
+*.css   text eol=lf
+Dockerfile text eol=lf
+
+# Binary assets — never touch line endings (esp. the model artifact).
+*.pkl   binary
+*.pt    binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.pdf   binary

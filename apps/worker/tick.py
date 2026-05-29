@@ -18,6 +18,7 @@ the risk module exposes pure decision functions that this tick consumes."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -30,7 +31,7 @@ from config import settings
 from db.connection import AsyncSessionLocal
 from db.models import ExitState, Order, Position, SignalHistory
 from execution import get_executor
-from execution.base import ExecutionReport, OrderIntent, OrderType, Side, TimeInForce
+from execution.base import ExecutionReport, OrderIntent, OrderStatus, OrderType, Side, TimeInForce
 from execution.idempotency import already_submitted
 from markets import get_market_adapter
 from ml.sequences import FeatureEngineer
@@ -399,6 +400,53 @@ def _resolve_model(asset_class: str):
         return None
 
 
+_TRANSIENT_MARKERS = (
+    "timeout", "timed out", "connection", "temporarily", "rate limit",
+    "429", "500", "502", "503", "504", "unavailable", "reset", "try again",
+)
+
+
+def _is_transient(reason: Optional[str]) -> bool:
+    if not reason:
+        return False
+    low = reason.lower()
+    return any(m in low for m in _TRANSIENT_MARKERS)
+
+
+async def _place_with_retry(executor, intent: OrderIntent) -> ExecutionReport:
+    """Place an order with bounded exponential backoff on transient failures.
+
+    Safe to retry: OrderIntent's deterministic client_order_id makes
+    re-submission idempotent at the broker. Only transient errors (network /
+    timeout / 5xx / rate-limit) are retried — hard rejections return immediately.
+    Executors return a REJECTED report rather than raising, so we inspect both
+    the report and any raised exception."""
+    attempts = max(0, settings.executor_max_retries) + 1
+    base = settings.executor_retry_base_delay
+    report: Optional[ExecutionReport] = None
+    for i in range(attempts):
+        try:
+            report = await executor.place(intent)
+        except Exception as exc:
+            if i + 1 < attempts:
+                delay = base * (2 ** i)
+                logger.warning("[%s] %s place() raised %s — retry %d/%d in %.1fs",
+                               intent.asset_class, intent.symbol, exc, i + 1, attempts - 1, delay)
+                await asyncio.sleep(delay)
+                continue
+            raise
+        rejected = report.order.status == OrderStatus.REJECTED
+        if rejected and _is_transient(report.order.rejected_reason) and i + 1 < attempts:
+            delay = base * (2 ** i)
+            logger.warning("[%s] %s transient reject (%s) — retry %d/%d in %.1fs",
+                           intent.asset_class, intent.symbol, report.order.rejected_reason,
+                           i + 1, attempts - 1, delay)
+            await asyncio.sleep(delay)
+            continue
+        return report
+    return report  # type: ignore[return-value]
+
+
 async def _resolve_equity(executor, equity: Optional[float]) -> float:
     """Resolve sizing equity: explicit arg → live account balance → default."""
     if equity is not None:
@@ -454,7 +502,7 @@ async def _submit_and_persist(
             )
             return None, position
 
-    report = await executor.place(intent)
+    report = await _place_with_retry(executor, intent)
     filled_qty = report.filled_qty
     avg_px = report.avg_fill_price or intent.limit_px or 0.0
     fee = sum(f.commission for f in report.fills)

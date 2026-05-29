@@ -120,6 +120,12 @@ class Settings(BaseSettings):
     order_latency_jitter_max_ms: int = 0
     partial_fill_pct: float = 1.0  # 0 < partial_fill_pct <= 1.0
 
+    # Retry/backoff on transient executor.place() failures (network/timeout/5xx/
+    # rate-limit). Re-submission is safe because OrderIntent carries a
+    # deterministic client_order_id the broker dedupes on. 0 retries disables.
+    executor_max_retries: int = 2
+    executor_retry_base_delay: float = 0.5  # seconds; doubles each attempt
+
     # Worker live-loop cadence (seconds). Per-asset-class override via env.
     worker_tick_seconds_crypto: int = 300
     worker_tick_seconds_equity: int = 900

@@ -81,8 +81,11 @@ def _apply_state_to_es(es: ExitState, state: dict) -> None:
     es.last_evaluated_at = datetime.now(timezone.utc)
 
 
-async def tick_once(asset_class: str, equity: float = 10_000.0) -> None:
-    """Run one cycle for `asset_class`. Logs each symbol's outcome."""
+async def tick_once(asset_class: str, equity: Optional[float] = None) -> None:
+    """Run one cycle for `asset_class`. Logs each symbol's outcome.
+
+    `equity` for position sizing is resolved in priority order:
+      explicit arg → executor's live account balance → settings.default_equity."""
     adapter = get_market_adapter(asset_class)
     if not adapter.is_market_open():
         logger.info("[%s] market closed — skipping tick", asset_class)
@@ -96,6 +99,8 @@ async def tick_once(asset_class: str, equity: float = 10_000.0) -> None:
     combiner = build_default_combiner(asset_class)
     model = _resolve_model(asset_class)
     fe = FeatureEngineer()
+    equity = await _resolve_equity(executor, equity)
+    logger.info("[%s] sizing equity = %.2f", asset_class, equity)
     sizer = PositionSizer(equity)
 
     async with AsyncSessionLocal() as session:
@@ -171,7 +176,7 @@ async def _process_symbol(
     # 2. Combiner -> SignalResult, persist signal_history row.
     combined = combiner.combine_signals(
         symbol, feats, px_now,
-        model_predictions=_model_pred(model, symbol, feats),
+        model_predictions=_model_pred(model, symbol, df),
     )
     result = combine_to_result(combined)
     session.add(SignalHistory(
@@ -394,15 +399,37 @@ def _resolve_model(asset_class: str):
         return None
 
 
-def _model_pred(model, symbol: str, feats: pd.DataFrame) -> dict[str, float]:
+async def _resolve_equity(executor, equity: Optional[float]) -> float:
+    """Resolve sizing equity: explicit arg → live account balance → default."""
+    if equity is not None:
+        return float(equity)
+    try:
+        live = await executor.get_account_equity()
+    except Exception:
+        logger.warning("get_account_equity failed — using default", exc_info=True)
+        live = None
+    if live is not None and live > 0:
+        return float(live)
+    return float(settings.default_equity)
+
+
+def _model_pred(model, symbol: str, df: pd.DataFrame) -> dict[str, float]:
     """Return {symbol: predicted_return} for MLStrategy; {} when no model.
 
-    Empty dict is the no-op: combiner.combine_signals skips MLStrategy's
-    model_predictions path and falls back to its internal heuristic."""
-    if model is None or feats.empty:
+    Registry models (e.g. EnsembleSignalModel) are trained on
+    ml.features.build_features columns, which differ from FeatureEngineer's
+    output — so build the model's own feature frame from the raw OHLCV df
+    (the same path ml.pipeline / ml.inference use). Empty dict is the no-op:
+    combine_signals then skips MLStrategy's model_predictions path and the
+    blend is technical-only."""
+    if model is None or df.empty:
         return {}
     try:
-        result = model.predict(feats)
+        from ml.features import build_features
+        model_feats = build_features(df)
+        if model_feats.empty:
+            return {}
+        result = model.predict(model_feats)
         return {symbol: float(result.predicted_return)}
     except Exception:
         logger.debug("model.predict failed for %s", symbol, exc_info=True)

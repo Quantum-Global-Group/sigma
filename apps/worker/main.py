@@ -1,15 +1,16 @@
 """Live trading loop entry point.
 
-Runs a per-asset-class cycle on a fixed cadence:
+Runs a per-asset-class cycle on a fixed cadence (the full body lives in
+worker.tick.tick_once):
     1. Universe selection
-    2. Per-symbol: candle fetch → features → signal
-    3. Strategy combiner → risk-scaled sizing
-    4. Execution (paper or coinbase) → persist orders/positions/exit state
+    2. Per-symbol: candle fetch → features → strategy combiner (blended with the
+       trained registry model) → SignalResult
+    3. Risk-scaled position sizing against the live account equity
+    4. Execution (paper | coinbase | alpaca) → persist orders/positions/exit state
 
-The full body of step 3-4 lands when razorBill is subtree-imported and its
-risk/sizing/exits modules are ported into apps/api/risk/. Until then this
-module owns the loop scaffolding so deployment, scheduling, and graceful
-shutdown can be tested end-to-end."""
+This module owns the loop: asset-class fan-out, fixed-cadence scheduling, and
+graceful SIGINT/SIGTERM shutdown. Single instance only — two workers would
+race on positions and double-place orders."""
 
 from __future__ import annotations
 

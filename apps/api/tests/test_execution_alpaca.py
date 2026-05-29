@@ -83,3 +83,40 @@ def test_alpaca_buy_without_qty_or_notional_rejected(monkeypatch):
 
     assert report.order.status.value == "rejected"
     assert "qty or notional" in (report.order.rejected_reason or "")
+
+
+# ---------------------------------------------------------------------------
+# get_account_equity (A8)
+# ---------------------------------------------------------------------------
+
+def _executor_with_account(monkeypatch, account):
+    pytest.importorskip("alpaca")
+    from config import settings as cfg
+    monkeypatch.setattr(cfg, "alpaca_api_key", "k")
+    monkeypatch.setattr(cfg, "alpaca_secret", "s")
+    monkeypatch.setattr(cfg, "alpaca_paper", True)
+    fake_client = MagicMock()
+    if isinstance(account, Exception):
+        fake_client.get_account.side_effect = account
+    else:
+        fake_client.get_account.return_value = account
+    with patch("alpaca.trading.client.TradingClient", return_value=fake_client):
+        from execution.alpaca import AlpacaExecutor
+        return AlpacaExecutor()
+
+
+def test_get_account_equity_returns_float(monkeypatch):
+    ex = _executor_with_account(monkeypatch, MagicMock(equity="25123.45", cash="100.0"))
+    assert asyncio.run(ex.get_account_equity()) == pytest.approx(25123.45)
+
+
+def test_get_account_equity_falls_back_to_cash(monkeypatch):
+    acct = MagicMock(equity=None)
+    acct.cash = "777.0"
+    ex = _executor_with_account(monkeypatch, acct)
+    assert asyncio.run(ex.get_account_equity()) == pytest.approx(777.0)
+
+
+def test_get_account_equity_none_on_error(monkeypatch):
+    ex = _executor_with_account(monkeypatch, RuntimeError("api down"))
+    assert asyncio.run(ex.get_account_equity()) is None

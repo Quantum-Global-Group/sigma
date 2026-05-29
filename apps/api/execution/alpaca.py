@@ -118,6 +118,26 @@ class AlpacaExecutor(Executor):
             order.rejected_reason = str(exc)
             return ExecutionReport(order=order, fills=[])
 
+    async def get_account_equity(self) -> Optional[float]:
+        """Live paper/live account equity from Alpaca, or None on error.
+
+        Used by the worker to size positions against the real balance instead
+        of a hardcoded default. Falls back to cash if equity isn't present."""
+        loop = asyncio.get_event_loop()
+        try:
+            account = await loop.run_in_executor(None, self._client.get_account)
+        except Exception:
+            logger.exception("[alpaca] get_account failed")
+            return None
+        for attr in ("equity", "cash"):
+            val = getattr(account, attr, None)
+            if val is not None:
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    continue
+        return None
+
     # ---- internal -------------------------------------------------------
 
     def _precheck(self, intent: OrderIntent) -> Optional[str]:

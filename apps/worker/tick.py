@@ -93,7 +93,8 @@ async def tick_once(asset_class: str, equity: float = 10_000.0) -> None:
     logger.info("[%s] tick: %d symbols", asset_class, len(symbols))
 
     executor = get_executor(asset_class)
-    combiner = build_default_combiner()
+    combiner = build_default_combiner(asset_class)
+    model = _resolve_model(asset_class)
     fe = FeatureEngineer()
     sizer = PositionSizer(equity)
 
@@ -111,6 +112,7 @@ async def tick_once(asset_class: str, equity: float = 10_000.0) -> None:
                     adapter=adapter,
                     fe=fe,
                     combiner=combiner,
+                    model=model,
                     sizer=sizer,
                     executor=executor,
                     open_position=positions.get(symbol),
@@ -134,6 +136,7 @@ async def _process_symbol(
     adapter,
     fe: FeatureEngineer,
     combiner,
+    model,
     sizer: PositionSizer,
     executor,
     open_position: Optional[Position],
@@ -166,7 +169,10 @@ async def _process_symbol(
         )
 
     # 2. Combiner -> SignalResult, persist signal_history row.
-    combined = combiner.combine_signals(symbol, feats, px_now)
+    combined = combiner.combine_signals(
+        symbol, feats, px_now,
+        model_predictions=_model_pred(model, symbol, feats),
+    )
     result = combine_to_result(combined)
     session.add(SignalHistory(
         user_id=settings.system_user_id,
@@ -373,6 +379,34 @@ def _in_cooldown(symbol: str, recent_sells: dict[str, datetime]) -> bool:
         last = last.replace(tzinfo=timezone.utc)
     age = (datetime.now(timezone.utc) - last).total_seconds() / 60.0
     return age < settings.rebuy_cooldown_min
+
+
+def _resolve_model(asset_class: str):
+    """Load the best trained model for *asset_class* from the registry, or None.
+
+    Wraps the import so a missing / corrupt artifact degrades gracefully to
+    pure technical-strategy signals rather than crashing the tick."""
+    try:
+        from ml.models.registry import resolve
+        return resolve(asset_class)
+    except Exception:
+        logger.warning("model registry unavailable for %s", asset_class, exc_info=True)
+        return None
+
+
+def _model_pred(model, symbol: str, feats: pd.DataFrame) -> dict[str, float]:
+    """Return {symbol: predicted_return} for MLStrategy; {} when no model.
+
+    Empty dict is the no-op: combiner.combine_signals skips MLStrategy's
+    model_predictions path and falls back to its internal heuristic."""
+    if model is None or feats.empty:
+        return {}
+    try:
+        result = model.predict(feats)
+        return {symbol: float(result.predicted_return)}
+    except Exception:
+        logger.debug("model.predict failed for %s", symbol, exc_info=True)
+        return {}
 
 
 async def _submit_and_persist(

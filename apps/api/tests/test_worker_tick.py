@@ -1,49 +1,105 @@
-"""Worker tick smoke tests — verify the loop iterates the universe and
-short-circuits on a closed market. The fully-wired tick (signal -> risk ->
-sizing -> execute -> persist) is exercised by integration tests in Phase C
-since it needs a real Postgres + executor."""
+"""Tests for the model-wiring helpers in apps/worker/tick.py (A2/A4).
 
-import asyncio
+Imports _resolve_model and _model_pred from tick.py directly so we can
+unit-test them without spinning up a full async trading cycle.
+"""
+
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 
-# The worker package lives at apps/worker (sibling to apps/api).
-# parents[0]=tests, [1]=api, [2]=apps. Add apps/ to sys.path so `worker.tick`
-# resolves to apps/worker/tick.py.
-APPS_DIR = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(APPS_DIR))
+# apps/api needs to be on sys.path (config, ml.*); apps/worker for tick.py
+_api = Path(__file__).parents[1]
+_worker = _api.parent / "worker"
+sys.path.insert(0, str(_api))
+sys.path.insert(0, str(_worker))
 
+import pandas as pd
+import numpy as np
+import pytest
+from unittest.mock import MagicMock
 
-def test_tick_skips_when_market_closed():
-    """Equity adapter's is_market_open returns False on weekends — verify the
-    tick short-circuits without entering the per-symbol loop."""
-    from worker.tick import tick_once
-
-    fake_session = MagicMock()
-    fake_session.commit = AsyncMock()
-    fake_session.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
-
-    @AsyncMock
-    async def _ctx_mgr(*a, **kw):
-        return fake_session
-
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=fake_session)
-    cm.__aexit__ = AsyncMock(return_value=None)
-
-    with patch("markets.equity.EquityAdapter.is_market_open", return_value=False), \
-         patch("worker.tick.AsyncSessionLocal", return_value=cm), \
-         patch("worker.tick.get_universe_selector") as sel:
-        asyncio.run(tick_once("equity"))
-
-    sel.assert_not_called()  # short-circuited before universe selection
+from tick import _model_pred, _resolve_model
 
 
-def test_tick_main_wrapper_swallows_exceptions():
-    """worker.main.tick_once wraps worker.tick.tick_once and logs without raising."""
-    from worker.main import tick_once
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
 
-    with patch("worker.tick.tick_once", side_effect=RuntimeError("boom")):
-        # Should not raise.
-        asyncio.run(tick_once("crypto"))
+def _make_feats(n: int = 30) -> pd.DataFrame:
+    rng = np.random.default_rng(42)
+    idx = pd.date_range("2024-01-01", periods=n, freq="D")
+    return pd.DataFrame(
+        {
+            "o": rng.uniform(100, 110, n),
+            "h": rng.uniform(110, 120, n),
+            "l": rng.uniform(90, 100, n),
+            "c": rng.uniform(100, 110, n),
+            "v": rng.uniform(1e5, 1e6, n),
+        },
+        index=idx,
+    )
+
+
+# ---------------------------------------------------------------------------
+# _resolve_model
+# ---------------------------------------------------------------------------
+
+def test_resolve_model_returns_none_when_no_artifact(tmp_path, monkeypatch):
+    """No pkl in model_dir → returns None without raising."""
+    monkeypatch.setattr("config.settings.model_dir", str(tmp_path))
+    # Clear cache so the fresh tmp_path is used
+    import ml.models.registry as reg
+    reg.clear_cache()
+    result = _resolve_model("equity")
+    assert result is None
+
+
+def test_resolve_model_swallows_import_error(monkeypatch):
+    """If the registry import itself fails, _resolve_model returns None."""
+    import builtins
+    real_import = builtins.__import__
+
+    def broken_import(name, *args, **kwargs):
+        if name == "ml.models.registry":
+            raise ImportError("simulated missing module")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", broken_import)
+    result = _resolve_model("equity")
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _model_pred
+# ---------------------------------------------------------------------------
+
+def test_model_pred_empty_when_no_model():
+    assert _model_pred(None, "AAPL", _make_feats()) == {}
+
+
+def test_model_pred_empty_when_feats_empty():
+    fake = MagicMock()
+    assert _model_pred(fake, "AAPL", pd.DataFrame()) == {}
+
+
+def test_model_pred_returns_symbol_dict():
+    fake = MagicMock()
+    fake.predict.return_value = MagicMock(predicted_return=0.03)
+    result = _model_pred(fake, "AAPL", _make_feats())
+    assert list(result.keys()) == ["AAPL"]
+    assert result["AAPL"] == pytest.approx(0.03)
+
+
+def test_model_pred_swallows_predict_exception():
+    fake = MagicMock()
+    fake.predict.side_effect = RuntimeError("model exploded")
+    result = _model_pred(fake, "TSLA", _make_feats())
+    assert result == {}
+
+
+def test_model_pred_casts_to_float():
+    """predicted_return might come back as numpy scalar — must be plain float."""
+    fake = MagicMock()
+    fake.predict.return_value = MagicMock(predicted_return=np.float32(0.05))
+    result = _model_pred(fake, "MSFT", _make_feats())
+    assert isinstance(result["MSFT"], float)

@@ -92,10 +92,28 @@ class StrategyCombiner:
         )
 
 
-def build_default_combiner() -> StrategyCombiner:
-    """Construct a combiner from settings.enabled_strategies / strategy_weights."""
-    names = [s.strip() for s in settings.enabled_strategies.split(",") if s.strip()]
-    raw_weights = [float(w.strip()) for w in settings.strategy_weights.split(",") if w.strip()]
+def _resolve_strategy_config(asset_class: Optional[str]) -> tuple[str, str]:
+    """Return (names_csv, weights_csv) for an asset class, falling back to the
+    legacy global enabled_strategies / strategy_weights."""
+    if asset_class == "crypto" and settings.crypto_strategies.strip():
+        return settings.crypto_strategies, settings.crypto_strategy_weights
+    if asset_class == "equity" and settings.equity_strategies.strip():
+        return settings.equity_strategies, settings.equity_strategy_weights
+    return settings.enabled_strategies, settings.strategy_weights
+
+
+def build_default_combiner(asset_class: Optional[str] = None) -> StrategyCombiner:
+    """Construct a combiner for the given asset class.
+
+    crypto/equity pull their own strategy lists (SDE is equity-only — it
+    assumes daily bars). With no asset_class, or an empty per-asset list, this
+    falls back to the legacy global enabled_strategies."""
+    names_csv, weights_csv = _resolve_strategy_config(asset_class)
+    names = [s.strip() for s in names_csv.split(",") if s.strip()]
+    raw_weights = [float(w.strip()) for w in weights_csv.split(",") if w.strip()]
+    # Empty weights → equal weight across the selected strategies.
+    if not raw_weights:
+        raw_weights = [1.0] * len(names)
     while len(raw_weights) < len(names):
         raw_weights.append(0.0)
     raw_weights = raw_weights[: len(names)]
@@ -105,13 +123,13 @@ def build_default_combiner() -> StrategyCombiner:
     for name, w in zip(names, raw_weights):
         factory = _STRATEGY_FACTORIES.get(name)
         if factory is None:
-            logger.warning("Unknown strategy %r in enabled_strategies — skipping", name)
+            logger.warning("Unknown strategy %r in strategy config — skipping", name)
             continue
         strategies[name] = factory()
         weights[name] = float(w)
 
     if not strategies:
-        # Fall back to all-five-equal so the combiner never breaks startup
+        # Never break startup: fall back to all registered strategies, equal weight.
         for name, factory in _STRATEGY_FACTORIES.items():
             strategies[name] = factory()
             weights[name] = 1.0

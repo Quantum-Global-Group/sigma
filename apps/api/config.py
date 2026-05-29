@@ -116,8 +116,16 @@ class Settings(BaseSettings):
     worker_tick_seconds_equity: int = 900
 
     # Strategy combiner (razorBill multi-strategy)
+    # Legacy global list — kept as a fallback when a per-asset list is empty.
     enabled_strategies: str = "momentum,mean_reversion,breakout,regime,ml"
     strategy_weights: str = "0.2,0.2,0.2,0.2,0.2"
+    # Per-asset-class strategy selection. SDE strategies (gbm/ou/heston) assume
+    # daily bars (dt=1/252) so they are equity-only; crypto runs 5m bars.
+    crypto_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier"
+    equity_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier,gbm,ou,heston,ict"
+    # Empty → combiner falls back to equal weights across the selected list.
+    crypto_strategy_weights: str = ""
+    equity_strategy_weights: str = ""
     min_signal_confidence: float = 0.3
     strategy: StrategyParams = StrategyParams()
 

@@ -217,9 +217,10 @@ sigma/
 │   └── types/        # Shared TypeScript types — barrel `@sigma/types`
 ├── .github/workflows/  # CI (pytest + npm type-check on push/PR)
 ├── docs/
-│   ├── ROADMAP.md      # Milestone-level strategy (M1 alpha → M2 beta → M3 production)
+│   ├── ROADMAP.md      # Milestones + sprints + backlog (single source of truth)
+│   ├── MODELS.md       # Features, registry, training, worker model wiring
+│   ├── DEPLOY_EQUITY.md # Equity (Alpaca paper) Fly deploy runbook
 │   └── …
-├── 06_ROADMAP.md       # Granular daily checklist (Sprint 1)
 ├── docker-compose.yml  # postgres + redis + worker (under --profile worker)
 ├── Makefile
 └── .env.example
@@ -258,8 +259,9 @@ make train-ranking  # Fetch Coinbase history + fit the crypto RankingModel artif
 | [`docs/03_ENV_VARS.md`](./docs/03_ENV_VARS.md) | All environment variables and where to get them |
 | [`docs/04_DATABASE_SCHEMA.md`](./docs/04_DATABASE_SCHEMA.md) | SQL migrations and schema design decisions |
 | [`docs/05_API_REFERENCE.md`](./docs/05_API_REFERENCE.md) | Full endpoint reference with request/response shapes |
-| [`docs/ROADMAP.md`](./docs/ROADMAP.md) | Milestone-level strategic roadmap (M1 alpha → M2 beta → M3 production) |
-| [`06_ROADMAP.md`](./06_ROADMAP.md) | Granular daily checklist with done-when criteria |
+| [`docs/ROADMAP.md`](./docs/ROADMAP.md) | Milestones, sprints, and backlog (single source of truth) |
+| [`docs/MODELS.md`](./docs/MODELS.md) | Features, model registry, training, and worker model wiring |
+| [`docs/DEPLOY_EQUITY.md`](./docs/DEPLOY_EQUITY.md) | Equity (Alpaca paper) Fly deploy runbook |
 
 ---
 
@@ -390,11 +392,11 @@ Usage-based option: $0.01 per signal call — no subscription required.
 - [x] **razorBill absorption** — crypto signals, multi-strategy combiner, advanced exits, dynamic universe
 - [x] **Live worker loop** — paper executor, Coinbase Advanced Trade adapter, ExitState persistence, rebuy cooldown
 - [x] **Shared TypeScript types** + first CI workflow
-- [ ] **M1 — Internal alpha** (current) — Railway deploy + trained RankingModel + observability
-- [ ] **M2 — Beta** — multi-tenant crypto signals + customer-facing web pages + Stripe metering for crypto
-- [ ] **M3 — Production** — Coinbase sandbox → live, per-day notional cap, DR runbook
+- [ ] **M1 — Internal alpha** (current) — Fly deploy + trained equity ensemble + observability
+- [ ] **M2 — Beta** — multi-tenant signals + customer-facing web pages + Stripe metering
+- [ ] **M3 — Production** — sandbox → live, per-day notional cap, DR runbook
 
-See [`docs/ROADMAP.md`](./docs/ROADMAP.md) for the strategic milestone view and [`06_ROADMAP.md`](./06_ROADMAP.md) for the granular daily checklist.
+See [`docs/ROADMAP.md`](./docs/ROADMAP.md) for milestones + sprints + backlog (single source of truth).
 
 ---
 

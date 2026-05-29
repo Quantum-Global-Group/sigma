@@ -4,9 +4,22 @@ Working doc for what's coming next. Single-source-of-truth for milestones, sprin
 
 **Operating mode:** solo, side-project, ~20h per 2-week sprint. Scope is deliberately small per sprint so things actually finish.
 
-**Next milestone:** Internal alpha — running the merged sigma+razorBill stack for myself in paper mode. No customer surface yet.
+**Next milestone:** Internal alpha — running the merged sigma + razorBill + tradeFlux stack for myself in paper mode. No customer surface yet.
 
-> **Companion doc:** [`/06_ROADMAP.md`](../06_ROADMAP.md) at the repo root holds the granular, day-by-day checklist with explicit done-when criteria. Use that for Sprint 1's detailed task list; use this doc for milestone strategy and the long backlog.
+> ## Current status (2026-05)
+>
+> The alpha pivoted **equity-first** (Alpaca paper) and absorbed a third repo,
+> `tradeFluxsimulator` (now archived). What's shipped on `main`:
+> - 3-repo merge: razorBill strategies + sigma API/worker + tradeFlux Alpaca execution
+> - Per-asset strategy combiner; trained **equity ensemble** wired into the worker
+> - Reliable equity data: **Tiingo → Alpaca → yfinance** (yfinance is last-resort)
+> - Real Alpaca account-equity sizing; worker Sentry; `/health/worker` liveness;
+>   `executor.place()` retry/backoff; Redis singleton lock
+> - Deploy target is **Fly.io** (not Railway); see [`DEPLOY_EQUITY.md`](DEPLOY_EQUITY.md)
+>   and [`MODELS.md`](MODELS.md)
+>
+> **Remaining for the alpha is operational:** run the Fly deploy, then observe.
+> The code build is effectively complete.
 
 ---
 
@@ -15,10 +28,10 @@ Working doc for what's coming next. Single-source-of-truth for milestones, sprin
 ### M1 — Internal alpha (paper) · target: 8 weeks from PR #1 merge
 
 Success criteria:
-- Worker runs on Railway for 2+ consecutive weeks without manual intervention
-- Trained `crypto_ranking_v1.0.pkl` artifact in production, not the heuristic fallback
+- Worker runs on **Fly.io** for 2+ consecutive weeks without manual intervention
+- Trained **equity `ensemble_v1.0.pkl`** artifact in production, not the heuristic fallback (crypto `ranking` follows once the equity loop is observed)
 - Daily signal log + weekly trade-review habit established
-- Sentry shows ≤1 unique exception per week
+- Sentry shows ≤1 unique exception per week (worker Sentry now wired)
 - A go/no-go decision on M2 is informed by real observed behavior
 
 ### M2 — Beta (paper, multi-tenant) · target: after M1 + 4 weeks observation
@@ -67,6 +80,12 @@ Cleanup that's already done:
 ## M1 — Internal alpha
 
 ### Sprint 1 — Deploy + first model train (2 weeks)
+
+> **Status:** delivered in **equity** form. Fly configs (`apps/{api,worker}/fly.toml`)
+> live; the equity **ensemble** is trained (Tiingo) and baked into the worker image
+> (`MODEL_DIR` fix); worker Sentry + `/health/worker` shipped. The table below is the
+> original crypto-first plan — the equivalent equity steps are in
+> [`DEPLOY_EQUITY.md`](DEPLOY_EQUITY.md). Remaining: run `fly deploy` + observe.
 
 | # | Task | Notes | Est |
 |---|---|---|---|
@@ -162,9 +181,9 @@ Unsorted, untimed. Items move into a sprint when they earn it. Tagged by area fo
 
 ### Operations
 
-- **Railway → Fly.io evaluation** — if Railway pricing or quotas become a problem
-- **Postgres backup automation** — pgbackrest or Railway's built-in
-- **Worker single-instance guarantee** — Railway might spin two; need a Redis-backed lock or a single replica enforced
+- ~~Railway → Fly.io evaluation~~ — **done**: deploy target is Fly (`apps/{api,worker}/fly.toml`)
+- ~~Worker single-instance guarantee~~ — **done**: Redis singleton lock + fly single-machine pin
+- **Postgres backup automation** — Timescale Cloud snapshots or pgbackrest
 - **Migration rollback script** — currently forward-only; document the rollback path for 005/006
 - **Secrets rotation drill** — `INTERNAL_SECRET`, Coinbase keys, Stripe webhook secret
 
@@ -188,15 +207,16 @@ Unsorted, untimed. Items move into a sprint when they earn it. Tagged by area fo
 
 - **`StripeEvents` table integration verification** — exists in schema, not sure every webhook handler writes to it
 - **Naive partial-fill math in `_apply_fill_to_position`** — `_PR #1 risks` lists this; tighten when live trading nears
-- **CRLF warnings on every git op** — set `core.autocrlf=false` repo-wide, or add `.gitattributes`
+- ~~CRLF warnings on every git op~~ — **done**: `.gitattributes` (`* text=auto eol=lf`) + renormalize
+- ~~Duplicate `06_ROADMAP.md`~~ — **done**: deleted; this file is the single source of truth
 - **`test_rate_limit.py` AsyncMock warnings** — coroutine never awaited; cosmetic but noisy
-- **Duplicate `06_ROADMAP.md`** — exists at repo root from the WIP commit; either fold into `docs/ROADMAP.md` (this file) or delete
+- **Portfolio tests require live Redis** — `test_portfolio.py` hits a real Redis (pass in CI, fail locally); mock it
 - **Streamlit dashboards** in `_legacy_razorbill/` deleted; no Streamlit code remains, but `.env.example` no longer mentions any Streamlit env vars (verify)
 
 ### Documentation
 
-- **`docs/MODELS.md`** — training, retraining, artifact naming, registry behavior
-- **`docs/DEPLOY_RAZORBILL.md`** or fold into existing `DEPLOY.md` — new env vars, worker service setup
+- ~~`docs/MODELS.md`~~ — **done**: features, registry, training, worker wiring, retrain cadence
+- ~~equity deploy runbook~~ — **done**: [`docs/DEPLOY_EQUITY.md`](DEPLOY_EQUITY.md)
 - **`docs/05_API_REFERENCE.md`** — positions / orders / execution endpoint shapes
 - **`docs/decisions/`** ADR folder — start with the squash-vs-rebase decision from Sprint 0
 - **Runbook: "worker started doing X, here's how to stop it safely"**

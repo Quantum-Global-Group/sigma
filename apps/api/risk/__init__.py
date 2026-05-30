@@ -11,6 +11,18 @@ from .exits import compute_exit_orders, compute_exit_orders_advanced  # noqa: F4
 from .manager import RiskManager, RiskMetrics  # noqa: F401
 from .portfolio import PortfolioManager  # noqa: F401
 from .sizing import PositionSizer, Sizing, SizingMethod  # noqa: F401
+# Options risk layer (P5)
+from .greeks import (  # noqa: F401
+    GreekExposure,
+    GreekLimits,
+    HedgeRecommendation,
+    aggregate_greeks,
+    check_greek_limits,
+    delta_hedge,
+)
+from .kill_switch import HaltThresholds, KillSwitch, evaluate_halt  # noqa: F401
+from .audit_log import AuditLog, AuditRecord  # noqa: F401
+from .option_sizing import OptionSize, option_position_size  # noqa: F401
 
 __all__ = [
     "compute_exit_orders",
@@ -21,4 +33,18 @@ __all__ = [
     "PositionSizer",
     "Sizing",
     "SizingMethod",
+    # options risk layer
+    "GreekExposure",
+    "GreekLimits",
+    "HedgeRecommendation",
+    "aggregate_greeks",
+    "check_greek_limits",
+    "delta_hedge",
+    "HaltThresholds",
+    "KillSwitch",
+    "evaluate_halt",
+    "AuditLog",
+    "AuditRecord",
+    "OptionSize",
+    "option_position_size",
 ]

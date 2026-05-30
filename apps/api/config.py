@@ -146,6 +146,19 @@ class Settings(BaseSettings):
     # (paper/sim venues). Alpaca reports its real account equity instead.
     default_equity: float = 10_000.0
 
+    # Options risk layer (P5). Net-Greek caps are in share-equivalents
+    # (contract-scaled); 0 disables a cap. IV-rank bands gate strategy choice.
+    option_risk_per_trade: float = 0.02       # fraction of equity riskable per option trade
+    option_max_contracts: int = 50
+    option_max_net_delta: float = 0.0         # 0 = no cap
+    option_max_net_gamma: float = 0.0
+    option_max_net_vega: float = 0.0
+    option_delta_hedge_tolerance: float = 1.0
+    option_max_spread_pct: float = 0.10
+    option_min_volume: int = 10
+    option_min_open_interest: int = 50
+    option_commission_per_contract: float = 0.65
+
     # Strategy combiner (razorBill multi-strategy)
     # Legacy global list — kept as a fallback when a per-asset list is empty.
     enabled_strategies: str = "momentum,mean_reversion,breakout,regime,ml"

@@ -21,8 +21,11 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     debug: bool = True
-    api_port: int = 8000
+    api_port: int = 8001
+    api_host: str = "0.0.0.0"
     secret_key: str = "change-me"
+    # Comma-separated browser origins allowed to call the API (split-server dev/prod).
+    cors_origins: str = "http://localhost:3001"
 
     database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/sigma"
     database_pool_size: int = 10
@@ -181,6 +184,10 @@ class Settings(BaseSettings):
     max_daily_loss_pct: float = 0.05
     per_trade_notional_cap_usd: float = 0.0  # 0 disables
     per_symbol_notional_caps: str = ""        # e.g. "PEPE:75,API3:50"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
     def per_symbol_caps_map(self) -> dict[str, float]:

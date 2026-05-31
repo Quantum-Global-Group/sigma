@@ -160,6 +160,12 @@ class Settings(BaseSettings):
     # (paper/sim venues). Alpaca reports its real account equity instead.
     default_equity: float = 10_000.0
 
+    # Market-data harnessing — persist fetched OHLCV into the candles hypertable
+    # each tick so data is reusable for backfill/training. Only the tail is
+    # written per call (the upsert gap-fills); failures never break a tick.
+    persist_candles: bool = True
+    persist_candles_tail: int = 20
+
     # Options risk layer (P5). Net-Greek caps are in share-equivalents
     # (contract-scaled); 0 disables a cap. IV-rank bands gate strategy choice.
     option_risk_per_trade: float = 0.02       # fraction of equity riskable per option trade

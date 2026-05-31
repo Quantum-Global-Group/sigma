@@ -149,9 +149,23 @@ async def _process_symbol(
     exit_state: dict,
     recent_sells: dict[str, datetime],
 ) -> None:
-    df = adapter.fetch_ohlcv(symbol, _default_timeframe(asset_class))
+    timeframe = _default_timeframe(asset_class)
+    df = adapter.fetch_ohlcv(symbol, timeframe)
     if df.empty:
         return
+
+    # Harness the bars we just fetched (best-effort — never break the tick).
+    if settings.persist_candles:
+        try:
+            from db.candle_store import upsert_candles
+            await upsert_candles(
+                session, asset_class=asset_class, symbol=symbol,
+                timeframe=timeframe, df=df,
+                source=getattr(adapter, "name", asset_class),
+                tail=settings.persist_candles_tail,
+            )
+        except Exception:
+            logger.debug("[%s] %s candle persist failed", asset_class, symbol, exc_info=True)
 
     feats = fe.compute(df)
     px_now = float(feats["c"].iloc[-1])

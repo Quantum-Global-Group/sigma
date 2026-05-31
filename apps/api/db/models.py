@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -103,6 +103,13 @@ class Position(Base):
     closed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Option-specific fields (migration 008); NULL for equity/crypto rows.
+    underlying: Mapped[str | None] = mapped_column(String(20))
+    expiry: Mapped[date | None] = mapped_column(Date)
+    strike: Mapped[float | None] = mapped_column(Numeric(12, 4))
+    right: Mapped[str | None] = mapped_column(String(4))
+    multiplier: Mapped[int | None] = mapped_column(SmallInteger)
+    meta: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class Order(Base):
@@ -126,6 +133,13 @@ class Order(Base):
     stop_px: Mapped[float | None] = mapped_column(Numeric(20, 8))
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="filled")
     raw: Mapped[dict | None] = mapped_column(JSONB)
+    # Option-specific fields (migration 008); NULL for equity/crypto rows.
+    underlying: Mapped[str | None] = mapped_column(String(20))
+    expiry: Mapped[date | None] = mapped_column(Date)
+    strike: Mapped[float | None] = mapped_column(Numeric(12, 4))
+    right: Mapped[str | None] = mapped_column(String(4))
+    multiplier: Mapped[int | None] = mapped_column(SmallInteger)
+    meta: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class ExitState(Base):

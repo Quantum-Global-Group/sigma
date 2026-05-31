@@ -40,17 +40,21 @@ logger = logging.getLogger("worker")
 async def _run_tick(asset_class: str) -> None:
     """One pass over the configured universe for `asset_class`.
 
-    Thin indirection over worker.tick.tick_once. Exceptions propagate to the
-    caller (_drive), which records them in the heartbeat and logs them — so a
-    failed tick is both visible (Sentry) and observable (GET /health/worker)."""
-    from worker.tick import tick_once as _tick
-
-    await _tick(asset_class)
+    Options use a chain-based cycle (options_tick_once); equity/crypto use the
+    OHLCV-based tick_once. Exceptions propagate to the caller (_drive)."""
+    if asset_class == "option":
+        from worker.options_tick import options_tick_once as _opt_tick
+        await _opt_tick()
+    else:
+        from worker.tick import tick_once as _tick
+        await _tick(asset_class)
 
 
 def _interval_for(asset_class: str) -> int:
     if asset_class == "crypto":
         return settings.worker_tick_seconds_crypto
+    if asset_class == "option":
+        return settings.worker_tick_seconds_option
     return settings.worker_tick_seconds_equity
 
 

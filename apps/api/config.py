@@ -141,6 +141,7 @@ class Settings(BaseSettings):
     # Worker live-loop cadence (seconds). Per-asset-class override via env.
     worker_tick_seconds_crypto: int = 300
     worker_tick_seconds_equity: int = 900
+    worker_tick_seconds_option: int = 900
 
     # Fallback sizing equity when the executor can't report a live balance
     # (paper/sim venues). Alpaca reports its real account equity instead.

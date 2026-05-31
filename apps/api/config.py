@@ -201,6 +201,9 @@ class Settings(BaseSettings):
     option_min_volume: int = 10
     option_min_open_interest: int = 50
     option_commission_per_contract: float = 0.65
+    # Max days to hold an option before a time-stop closes it at theoretical
+    # value (the options worker also settles to intrinsic at expiry).
+    option_max_hold_days: int = 21
 
     # Strategy combiner (razorBill multi-strategy)
     # Legacy global list — kept as a fallback when a per-asset list is empty.

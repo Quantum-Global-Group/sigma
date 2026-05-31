@@ -67,3 +67,66 @@ def settle_at_expiry(
         realized = (entry_price - iv) * multiplier * qty - commission
         outcome = "assigned" if iv > 0 else "expired_worthless"
     return Settlement(realized_pnl=realized, payoff=iv, outcome=outcome, commission=commission)
+
+
+@dataclass(frozen=True)
+class OptionAction:
+    """What to do with a held option leg this cycle.
+
+    action == "mark"      → still open; `unrealized_pnl` + `current_px` updated.
+    action == "settle"    → expired; `realized_pnl` booked, position closes.
+    action == "time_stop" → max hold reached; closed at theoretical value.
+    """
+    action: str                      # mark | settle | time_stop
+    current_px: float                # per-share theoretical (or intrinsic) value
+    unrealized_pnl: float            # populated for "mark"; 0 once closing
+    realized_pnl: float              # populated for "settle" / "time_stop"
+    outcome: str                     # held | exercised | assigned | expired_worthless | time_stop
+    commission: float = 0.0
+
+    @property
+    def closes(self) -> bool:
+        return self.action in ("settle", "time_stop")
+
+
+def manage_position(
+    *,
+    entry_price: float,
+    qty: float,
+    right: Right,
+    strike: float,
+    spot: float,
+    T: float,
+    sigma: float,
+    hold_days: int,
+    max_hold_days: int,
+    side: Side = "long",
+    r: float = 0.05,
+    multiplier: int = 100,
+    commission_per_contract: float = 0.65,
+) -> OptionAction:
+    """Decide settle / time-stop / mark for one held option leg. Pure.
+
+    Priority: expiry settlement (T<=0) → time stop (hold_days>=max) → mark."""
+    if T <= 0:
+        s = settle_at_expiry(
+            right=right, strike=strike, qty=qty, entry_price=entry_price,
+            S_expiry=spot, side=side, multiplier=multiplier,
+            commission_per_contract=commission_per_contract,
+        )
+        return OptionAction("settle", current_px=s.payoff, unrealized_pnl=0.0,
+                            realized_pnl=s.realized_pnl, outcome=s.outcome, commission=s.commission)
+
+    value = option_value(right, spot, strike, T, r, sigma, american=True)
+
+    if hold_days >= max_hold_days:
+        commission = commission_per_contract * qty
+        sign = 1.0 if side == "long" else -1.0
+        realized = sign * (value - entry_price) * multiplier * qty - commission
+        return OptionAction("time_stop", current_px=value, unrealized_pnl=0.0,
+                            realized_pnl=realized, outcome="time_stop", commission=commission)
+
+    sign = 1.0 if side == "long" else -1.0
+    unreal = sign * (value - entry_price) * multiplier * qty
+    return OptionAction("mark", current_px=value, unrealized_pnl=unreal,
+                        realized_pnl=0.0, outcome="held")

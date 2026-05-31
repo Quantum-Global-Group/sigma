@@ -24,6 +24,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import pandas as pd
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
@@ -72,6 +73,13 @@ async def options_tick_once(equity: Optional[float] = None) -> None:
     audit_log = AuditLog()
 
     async with AsyncSessionLocal() as session:
+        # Mark-to-market + settle/time-stop held option positions before opening
+        # new ones, so the dashboard shows live option P&L and positions close.
+        try:
+            await _manage_open_positions(session, adapter)
+        except Exception:
+            logger.exception("[option] position management failed")
+
         for underlying in underlyings:
             try:
                 await _process_underlying(
@@ -96,6 +104,98 @@ async def options_tick_once(equity: Optional[float] = None) -> None:
             logger.exception("[option] audit persist failed")
 
         await session.commit()
+
+
+async def _manage_open_positions(session: AsyncSession, adapter) -> None:
+    """Mark-to-market, settle (expiry), or time-stop each open option position.
+
+    Reuses sim/options/lifecycle.manage_position. Theoretical valuation off the
+    underlying spot + entry IV avoids needing the broker-native contract code
+    (which isn't persisted). Closes book realized P&L + a settlement Order."""
+    from sim.options.lifecycle import manage_position
+
+    res = await session.execute(
+        select(Position).where(Position.asset_class == "option").where(Position.closed.is_(False))
+    )
+    positions = list(res.scalars().all())
+    if not positions:
+        return
+
+    now = datetime.now(timezone.utc)
+    spot_cache: dict[str, Optional[float]] = {}
+
+    for pos in positions:
+        if not pos.underlying or pos.expiry is None or pos.strike is None or not pos.right:
+            continue
+        spot = _underlying_spot(adapter, pos.underlying, spot_cache)
+        if spot is None:
+            continue
+
+        T = max(0.0, (pos.expiry - now.date()).days / 365.0)
+        sigma = _entry_iv(pos)
+        hold_days = max(0, (now - _aware(pos.entry_ts)).days)
+
+        action = manage_position(
+            entry_price=float(pos.entry_px), qty=float(pos.qty), right=pos.right,
+            strike=float(pos.strike), spot=spot, T=T, sigma=sigma,
+            hold_days=hold_days, max_hold_days=settings.option_max_hold_days,
+            multiplier=int(pos.multiplier or 100),
+            commission_per_contract=settings.option_commission_per_contract,
+        )
+
+        pos.current_px = round(action.current_px, 6)
+        if action.closes:
+            pos.realized_pnl = float(pos.realized_pnl) + action.realized_pnl
+            pos.unrealized_pnl = 0.0
+            pos.qty = 0.0
+            pos.closed = True
+            pos.closed_at = now
+            session.add(Order(
+                asset_class="option", symbol=pos.symbol, side="sell",
+                qty=0.0, px=round(action.current_px, 6), fee=action.commission,
+                executor="lifecycle", status="filled",
+                order_type="market", time_in_force="day",
+                underlying=pos.underlying, expiry=pos.expiry, strike=pos.strike,
+                right=pos.right, multiplier=pos.multiplier,
+                meta={"event": action.action, "outcome": action.outcome,
+                      "realized_pnl": action.realized_pnl},
+            ))
+            logger.info("[option] %s %s realized=%.2f (%s)",
+                        pos.symbol, action.action, action.realized_pnl, action.outcome)
+        else:
+            pos.unrealized_pnl = round(action.unrealized_pnl, 6)
+
+
+def _underlying_spot(adapter, underlying: str, cache: dict) -> Optional[float]:
+    if underlying in cache:
+        return cache[underlying]
+    spot: Optional[float] = None
+    try:
+        df = adapter.fetch_ohlcv(underlying, "daily")
+        if not df.empty:
+            spot = float(df["close"].iloc[-1])
+    except Exception:
+        logger.debug("[option] spot fetch failed for %s", underlying, exc_info=True)
+    cache[underlying] = spot
+    return spot
+
+
+def _entry_iv(pos) -> float:
+    """Entry implied vol from the position meta, else a 0.30 fallback."""
+    try:
+        iv = (pos.meta or {}).get("iv_rank")  # informational; rank ≠ level
+        rationale = (pos.meta or {}).get("rationale", {})
+        sigma = rationale.get("entry_iv") or pos.meta.get("entry_iv") if pos.meta else None
+        if sigma and float(sigma) > 0:
+            s = float(sigma)
+            return s / 100.0 if s > 3 else s
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return 0.30
+
+
+def _aware(ts: datetime) -> datetime:
+    return ts if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
 
 
 # ---------------------------------------------------------------------------

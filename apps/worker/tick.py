@@ -178,6 +178,14 @@ async def _process_symbol(
 
     # 1. Exit check on any existing position before new entries.
     if open_position is not None:
+        # Mark-to-market: keep current price + unrealized P&L fresh each tick so
+        # the dashboard shows live P&L on open positions (long-only house book).
+        from risk.pnl import unrealized as _unrealized
+        open_position.current_px = px_now
+        open_position.unrealized_pnl = _unrealized(
+            float(open_position.entry_px), float(open_position.qty), px_now,
+        )
+
         # Track high-water mark for trailing-stop ratcheting
         hw = exit_state.get("high_water_px")
         new_hw = max(hw or 0.0, px_now) if open_position.qty > 0 else hw

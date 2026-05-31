@@ -38,7 +38,7 @@ class PositionOut(BaseModel):
 @router.get("", response_model=list[PositionOut])
 async def list_positions(
     auth: AuthDep,
-    asset_class: Optional[str] = Query(None, pattern="^(equity|crypto)$"),
+    asset_class: Optional[str] = Query(None, pattern="^(equity|crypto|option)$"),
     open_only: bool = Query(True),
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),

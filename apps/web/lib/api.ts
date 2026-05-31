@@ -5,6 +5,9 @@ import type {
   BacktestResult,
   CreateKeyResponse,
   ExecutionStatus,
+  OptionCandidate,
+  OptionExposure,
+  OptionPosition,
   Order,
   Position,
   RebalanceResponse,
@@ -146,6 +149,32 @@ export async function fetchOrders(
 
 export async function fetchExecutionStatus(apiKey: string): Promise<ExecutionStatus> {
   return apiFetch<ExecutionStatus>("/execution/status", apiKey);
+}
+
+// ─── Options ─────────────────────────────────────────────────────────────────
+
+export type { OptionCandidate, OptionExposure, OptionPosition } from "@sigma/types";
+
+export async function fetchOptionCandidates(
+  underlying: string,
+  apiKey: string,
+  expiry?: string,
+): Promise<OptionCandidate[]> {
+  const params = new URLSearchParams({ underlying });
+  if (expiry) params.set("expiry", expiry);
+  return apiFetch<OptionCandidate[]>(`/options/candidates?${params.toString()}`, apiKey);
+}
+
+export async function fetchOptionPositions(
+  apiKey: string,
+  openOnly: boolean = true,
+): Promise<OptionPosition[]> {
+  const params = new URLSearchParams({ open_only: String(openOnly) });
+  return apiFetch<OptionPosition[]>(`/options/positions?${params.toString()}`, apiKey);
+}
+
+export async function fetchOptionExposure(apiKey: string): Promise<OptionExposure> {
+  return apiFetch<OptionExposure>("/options/exposure", apiKey);
 }
 
 /**

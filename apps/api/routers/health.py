@@ -47,6 +47,7 @@ async def worker_health():
     cadence = {
         "crypto": settings.worker_tick_seconds_crypto,
         "equity": settings.worker_tick_seconds_equity,
+        "option": settings.worker_tick_seconds_option,
     }
     workers: dict[str, dict] = {}
     overall_ok = True

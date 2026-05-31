@@ -25,10 +25,11 @@ class ExecutionStatus(BaseModel):
     coinbase_sandbox: bool
     worker_asset_classes_default_crypto_seconds: int
     worker_asset_classes_default_equity_seconds: int
+    worker_asset_classes_default_option_seconds: int
 
 
 class RunCycleRequest(BaseModel):
-    asset_class: str = Field(..., pattern="^(equity|crypto)$")
+    asset_class: str = Field(..., pattern="^(equity|crypto|option)$")
 
 
 class RunCycleResponse(BaseModel):
@@ -43,6 +44,7 @@ async def execution_status(auth: AuthDep):
         coinbase_sandbox=settings.coinbase_sandbox,
         worker_asset_classes_default_crypto_seconds=settings.worker_tick_seconds_crypto,
         worker_asset_classes_default_equity_seconds=settings.worker_tick_seconds_equity,
+        worker_asset_classes_default_option_seconds=settings.worker_tick_seconds_option,
     )
 
 
@@ -54,10 +56,15 @@ async def run_cycle(body: RunCycleRequest, auth: AuthDep):
             detail="run_cycle requires X-Internal-Secret",
         )
 
-    # Lazy import — pulls in worker.tick (which transitively imports the
-    # whole signal stack). Keeping it lazy avoids paying that cost on a
-    # stock api startup that doesn't run cycles.
-    from worker.tick import tick_once
+    if body.asset_class == "option":
+        # Options use the chain-based loop, not the OHLCV tick_once.
+        from worker.options_tick import options_tick_once
+        await options_tick_once()
+    else:
+        # Lazy import — pulls in worker.tick (which transitively imports the
+        # whole signal stack). Keeping it lazy avoids paying that cost on a
+        # stock api startup that doesn't run cycles.
+        from worker.tick import tick_once
+        await tick_once(body.asset_class)
 
-    await tick_once(body.asset_class)
     return RunCycleResponse(asset_class=body.asset_class, triggered=True)

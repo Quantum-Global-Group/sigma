@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
 
+    # MLflow experiment tracking for *training* runs (Langfuse traces inference).
+    # Empty tracking URI → MLflow's local ./mlruns file store (no server needed).
+    mlflow_tracking_uri: str = ""
+    mlflow_experiment: str = "sigma-training"
+
     ibm_quantum_token: str = ""
     huggingface_token: str = ""
     iex_api_key: str = ""

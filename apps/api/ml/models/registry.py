@@ -27,6 +27,10 @@ _DEFAULT_ORDER: dict[str, list[str]] = {
     "equity": ["ensemble", "lstm", "quantum_hybrid"],
     # Crypto: razorBill RankingModel (LightGBM) first, then ensemble fallback
     "crypto": ["ranking", "ensemble"],
+    # Forex: ensemble first, then LSTM. No artifact until train_models.py
+    # --asset-class forex is run; resolve() returns None until then (heuristic
+    # + technical strategies serve forex in the meantime).
+    "forex": ["ensemble", "lstm"],
 }
 
 

@@ -176,6 +176,19 @@ class Settings(BaseSettings):
     label_horizon_bars: int = 5
     label_flat_threshold: float = 0.001    # 10 bps
 
+    # Self-evolving model loop. Promotion is human-gated: the loop proposes a
+    # champion change when a candidate beats the incumbent by min_improvement on
+    # directional accuracy (with >= min_samples labeled signals); a human
+    # approves via /models/promotions before it goes live.
+    promotion_min_improvement: float = 0.02   # +2 pts directional accuracy
+    promotion_min_samples: int = 50
+    # Worker-internal scheduler (APScheduler) — runs only on the singleton holder.
+    worker_scheduler_enabled: bool = True
+    label_interval_hours: int = 24            # nightly: label outcomes + evaluate champion
+    train_interval_hours: int = 168           # weekly: train candidate + propose promotion
+    # Empty → defaults to the worker's WORKER_ASSET_CLASSES at runtime.
+    self_evolve_asset_classes: str = ""
+
     # Options risk layer (P5). Net-Greek caps are in share-equivalents
     # (contract-scaled); 0 disables a cap. IV-rank bands gate strategy choice.
     option_risk_per_trade: float = 0.02       # fraction of equity riskable per option trade

@@ -72,6 +72,11 @@ async def run_loop(asset_classes: Iterable[str], stop: asyncio.Event) -> None:
         return
     logger.info("singleton lock acquired (%s)", instance_id)
 
+    # Self-evolution background jobs run only on the singleton holder, so they
+    # never double-run across instances. Optional + best-effort: a scheduler
+    # failure must never take down the trading loop.
+    scheduler = _maybe_start_scheduler(asset_classes)
+
     async def _drive(ac: str) -> None:
         interval = _interval_for(ac)
         while not stop.is_set():
@@ -100,7 +105,33 @@ async def run_loop(asset_classes: Iterable[str], stop: asyncio.Event) -> None:
             except asyncio.TimeoutError:
                 pass
 
-    await asyncio.gather(*(_drive(ac) for ac in asset_classes))
+    try:
+        await asyncio.gather(*(_drive(ac) for ac in asset_classes))
+    finally:
+        if scheduler is not None:
+            try:
+                scheduler.shutdown(wait=False)
+            except Exception:
+                logger.warning("scheduler shutdown failed", exc_info=True)
+
+
+def _maybe_start_scheduler(asset_classes: list[str]):
+    """Start the worker-internal self-evolution scheduler, or return None.
+
+    Disabled via WORKER_SCHEDULER_ENABLED=false, and degrades to None if
+    APScheduler isn't installed — the trading loop runs regardless."""
+    if not settings.worker_scheduler_enabled:
+        logger.info("worker scheduler disabled (WORKER_SCHEDULER_ENABLED=false)")
+        return None
+    try:
+        from worker.scheduler import build_scheduler
+        scheduler = build_scheduler(asset_classes)
+        scheduler.start()
+        logger.info("self-evolution scheduler started")
+        return scheduler
+    except Exception:
+        logger.warning("could not start self-evolution scheduler — continuing without it", exc_info=True)
+        return None
 
 
 def _parse_asset_classes() -> list[str]:

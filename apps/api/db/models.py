@@ -99,6 +99,55 @@ class AuditRecord(Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class ModelEvaluation(Base):
+    """Measured performance of a model version (migration 010)."""
+
+    __tablename__ = "model_evaluations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    asset_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    model_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    eval_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    n_samples: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    directional_accuracy: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    signal_accuracy: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    mean_abs_error: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    backtest_sharpe: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    backtest_win_rate: Mapped[float | None] = mapped_column(Numeric(6, 4))
+    metrics: Mapped[dict | None] = mapped_column(JSONB)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class ModelPromotion(Base):
+    """A proposed champion change, pending human approval (migration 010)."""
+
+    __tablename__ = "model_promotions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    asset_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    model_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    from_version: Mapped[str | None] = mapped_column(String(40))
+    to_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="pending")
+    proposed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[str | None] = mapped_column(String(64))
+    rationale: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class ModelChampion(Base):
+    """The active model version per (asset_class, model_type) (migration 010).
+    The worker resolves this each tick to pick which model serves signals."""
+
+    __tablename__ = "model_champions"
+
+    asset_class: Mapped[str] = mapped_column(String(16), primary_key=True)
+    model_type: Mapped[str] = mapped_column(String(32), primary_key=True)
+    version: Mapped[str] = mapped_column(String(40), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Candle(Base):
     __tablename__ = "candles"
 

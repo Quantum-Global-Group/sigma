@@ -98,13 +98,16 @@ async def tick_once(asset_class: str, equity: Optional[float] = None) -> None:
 
     executor = get_executor(asset_class)
     combiner = build_default_combiner(asset_class)
-    model = _resolve_model(asset_class)
     fe = FeatureEngineer()
     equity = await _resolve_equity(executor, equity)
     logger.info("[%s] sizing equity = %.2f", asset_class, equity)
     sizer = PositionSizer(equity)
 
     async with AsyncSessionLocal() as session:
+        # Resolve the active (human-approved champion) model + its version so
+        # signal_history is tagged with the version that produced it — the join
+        # the self-evolution loop later evaluates.
+        model, model_version = await _resolve_champion_model(session, asset_class)
         positions = await _load_open_positions(session, asset_class)
         exit_states = await _load_exit_states(session, list(positions.values()))
         recent_sells = await _load_recent_sells(session, asset_class)
@@ -119,6 +122,7 @@ async def tick_once(asset_class: str, equity: Optional[float] = None) -> None:
                     fe=fe,
                     combiner=combiner,
                     model=model,
+                    model_version=model_version,
                     sizer=sizer,
                     executor=executor,
                     open_position=positions.get(symbol),
@@ -143,6 +147,7 @@ async def _process_symbol(
     fe: FeatureEngineer,
     combiner,
     model,
+    model_version: str,
     sizer: PositionSizer,
     executor,
     open_position: Optional[Position],
@@ -202,7 +207,7 @@ async def _process_symbol(
         signal=result.signal,
         confidence=result.confidence,
         predicted_return=result.predicted_return,
-        model_version=result.model_version,
+        model_version=model_version,
         component_weights=result.component_weights,
     ))
 
@@ -401,17 +406,39 @@ def _in_cooldown(symbol: str, recent_sells: dict[str, datetime]) -> bool:
     return age < settings.rebuy_cooldown_min
 
 
-def _resolve_model(asset_class: str):
+def _resolve_model(asset_class: str, version: Optional[str] = None):
     """Load the best trained model for *asset_class* from the registry, or None.
 
     Wraps the import so a missing / corrupt artifact degrades gracefully to
     pure technical-strategy signals rather than crashing the tick."""
     try:
         from ml.models.registry import resolve
-        return resolve(asset_class)
+        return resolve(asset_class, version)
     except Exception:
         logger.warning("model registry unavailable for %s", asset_class, exc_info=True)
         return None
+
+
+async def _resolve_champion_model(session: AsyncSession, asset_class: str):
+    """Resolve (model, version) for the human-approved champion, if any.
+
+    Reads the active version from model_champions (DB-backed so it's shared
+    across the Fly worker and the local options worker); falls back to
+    settings.model_version when no champion has been promoted. The returned
+    version tags signal_history so outcomes can later be attributed per version."""
+    version = settings.model_version
+    try:
+        from ml.promotion import get_champion_version
+        champ = await get_champion_version(session, asset_class)
+        if champ:
+            version = champ
+    except Exception:
+        logger.debug("champion lookup failed for %s — using default version", asset_class, exc_info=True)
+
+    model = _resolve_model(asset_class, version)
+    # A model object carries its own version label; prefer it when present.
+    resolved_version = getattr(model, "model_version", None) or version
+    return model, resolved_version
 
 
 _TRANSIENT_MARKERS = (

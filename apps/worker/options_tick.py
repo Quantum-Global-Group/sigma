@@ -86,6 +86,15 @@ async def options_tick_once(equity: Optional[float] = None) -> None:
                 )
             except Exception:
                 logger.exception("[option] %s tick failed", underlying)
+
+        # Persist the full decision provenance (best-effort — never break the tick).
+        try:
+            from db.audit_store import persist_audit_log
+            n = await persist_audit_log(session, audit_log)
+            logger.info("[option] persisted %d audit records", n)
+        except Exception:
+            logger.exception("[option] audit persist failed")
+
         await session.commit()
 
 

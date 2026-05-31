@@ -171,6 +171,11 @@ class Settings(BaseSettings):
     persist_candles: bool = True
     persist_candles_tail: int = 20
 
+    # Outcome labeling (ml/labeling.py) — how far forward to measure a signal's
+    # realized return, and the |return| below which an outcome is "flat".
+    label_horizon_bars: int = 5
+    label_flat_threshold: float = 0.001    # 10 bps
+
     # Options risk layer (P5). Net-Greek caps are in share-equivalents
     # (contract-scaled); 0 disables a cap. IV-rank bands gate strategy choice.
     option_risk_per_trade: float = 0.02       # fraction of equity riskable per option trade

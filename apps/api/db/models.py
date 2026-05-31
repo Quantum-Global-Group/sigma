@@ -71,6 +71,32 @@ class SignalHistory(Base):
     features: Mapped[dict | None] = mapped_column(JSONB)
     component_weights: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True, server_default=func.now())
+    # Outcome labels (migration 009) — backfilled by ml/labeling.py once the
+    # forward window has elapsed; nullable until then.
+    realized_return: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    outcome: Mapped[str | None] = mapped_column(String(8))          # win | loss | flat
+    labeled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuditRecord(Base):
+    """Durable decision provenance (migration 009). Mirrors the in-memory
+    risk/audit_log.py::AuditRecord; persisted per options tick by db/audit_store.py."""
+
+    __tablename__ = "audit_records"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True, server_default=func.now())
+    asset_class: Mapped[str] = mapped_column(String(16), nullable=False, default="option")
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    strategy: Mapped[str | None] = mapped_column(String(40))
+    decision: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    data: Mapped[dict | None] = mapped_column(JSONB)
+    features: Mapped[dict | None] = mapped_column(JSONB)
+    signal: Mapped[dict | None] = mapped_column(JSONB)
+    risk: Mapped[dict | None] = mapped_column(JSONB)
+    gates: Mapped[list | None] = mapped_column(JSONB)
+    order_info: Mapped[dict | None] = mapped_column(JSONB)
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 class Candle(Base):

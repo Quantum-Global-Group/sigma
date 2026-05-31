@@ -72,9 +72,11 @@ class Settings(BaseSettings):
     #   crypto → coinbase | paper
     #   equity → alpaca   | paper
     #   option → moomoo   | paper
+    #   forex  → oanda    | paper
     crypto_executor: str = "paper"
     equity_executor: str = "paper"
     option_executor: str = "paper"
+    forex_executor: str = "paper"
     # Deprecated global toggle, kept as a fallback for older deploys. If set to
     # something other than "paper", it overrides the per-asset default for that
     # venue. New config should use crypto_executor / equity_executor.
@@ -110,6 +112,16 @@ class Settings(BaseSettings):
     moomoo_paper: bool = True
     moomoo_allow_live: bool = False        # hard guardrail: live needs this true
 
+    # Execution + data — OANDA (forex) via the v20 REST API (oandapyV20). OANDA
+    # is a cloud broker with practice + live environments; the adapter serves
+    # both OHLCV (mid candles) and execution (market orders, units-based).
+    oanda_api_token: str = ""
+    oanda_account_id: str = ""
+    oanda_environment: str = "practice"    # practice | live (data adapter)
+    oanda_paper: bool = True
+    oanda_allow_live: bool = False         # hard guardrail: live needs this true
+    oanda_order_timeout_seconds: int = 20
+
     # Execution — Coinbase Advanced Trade
     coinbase_api_key_name: str = ""
     coinbase_private_key: str = ""
@@ -142,6 +154,7 @@ class Settings(BaseSettings):
     worker_tick_seconds_crypto: int = 300
     worker_tick_seconds_equity: int = 900
     worker_tick_seconds_option: int = 900
+    worker_tick_seconds_forex: int = 900   # H4 bars → slow cadence is fine
 
     # Fallback sizing equity when the executor can't report a live balance
     # (paper/sim venues). Alpaca reports its real account equity instead.
@@ -168,9 +181,13 @@ class Settings(BaseSettings):
     # daily bars (dt=1/252) so they are equity-only; crypto runs 5m bars.
     crypto_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier"
     equity_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier,gbm,ou,heston,ict"
+    # Forex trades H4 bars, so the SDE strategies (gbm/ou/heston) — which assume
+    # daily bars (dt=1/252) — are excluded.
+    forex_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier"
     # Empty → combiner falls back to equal weights across the selected list.
     crypto_strategy_weights: str = ""
     equity_strategy_weights: str = ""
+    forex_strategy_weights: str = ""
     min_signal_confidence: float = 0.3
     strategy: StrategyParams = StrategyParams()
 

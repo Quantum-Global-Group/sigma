@@ -608,4 +608,8 @@ def _last_bar_ts(feats: pd.DataFrame):
 
 
 def _default_timeframe(asset_class: str) -> str:
-    return "5m" if asset_class == "crypto" else "daily"
+    if asset_class == "crypto":
+        return "5m"
+    if asset_class == "forex":
+        return "4h"
+    return "daily"

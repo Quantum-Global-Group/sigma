@@ -7,9 +7,16 @@ from __future__ import annotations
 
 from .base import UniverseSelector
 from .equity_static import StaticEquityUniverse
+from .forex_static import StaticForexUniverse
 from .option_universe import OptionUniverse
 
-__all__ = ["UniverseSelector", "StaticEquityUniverse", "OptionUniverse", "get_universe_selector"]
+__all__ = [
+    "UniverseSelector",
+    "StaticEquityUniverse",
+    "StaticForexUniverse",
+    "OptionUniverse",
+    "get_universe_selector",
+]
 
 
 def get_universe_selector(asset_class: str) -> UniverseSelector:
@@ -21,4 +28,6 @@ def get_universe_selector(asset_class: str) -> UniverseSelector:
         return DynamicCryptoUniverse()
     if asset_class == "option":
         return OptionUniverse()
+    if asset_class == "forex":
+        return StaticForexUniverse()
     raise ValueError(f"Unknown asset_class: {asset_class!r}")

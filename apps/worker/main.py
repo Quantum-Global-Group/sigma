@@ -55,6 +55,8 @@ def _interval_for(asset_class: str) -> int:
         return settings.worker_tick_seconds_crypto
     if asset_class == "option":
         return settings.worker_tick_seconds_option
+    if asset_class == "forex":
+        return settings.worker_tick_seconds_forex
     return settings.worker_tick_seconds_equity
 
 

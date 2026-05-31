@@ -148,6 +148,19 @@ class ModelChampion(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class EquitySnapshot(Base):
+    """Point-in-time account value + P&L for the equity curve (migration 011)."""
+
+    __tablename__ = "equity_snapshots"
+
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True, server_default=func.now())
+    base_equity: Mapped[float] = mapped_column(Numeric(20, 2), nullable=False)
+    total_realized: Mapped[float] = mapped_column(Numeric(20, 2), nullable=False, default=0)
+    total_unrealized: Mapped[float] = mapped_column(Numeric(20, 2), nullable=False, default=0)
+    total_value: Mapped[float] = mapped_column(Numeric(20, 2), nullable=False)
+    by_asset_class: Mapped[dict | None] = mapped_column(JSONB)
+
+
 class Candle(Base):
     __tablename__ = "candles"
 

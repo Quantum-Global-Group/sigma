@@ -186,6 +186,7 @@ class Settings(BaseSettings):
     worker_scheduler_enabled: bool = True
     label_interval_hours: int = 24            # nightly: label outcomes + evaluate champion
     train_interval_hours: int = 168           # weekly: train candidate + propose promotion
+    equity_snapshot_interval_hours: int = 24  # daily: record an equity-curve point
     # Empty → defaults to the worker's WORKER_ASSET_CLASSES at runtime.
     self_evolve_asset_classes: str = ""
 

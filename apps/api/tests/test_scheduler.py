@@ -93,12 +93,29 @@ async def test_train_and_propose_skips_when_trainer_returns_none(monkeypatch):
     propose.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_equity_snapshot_job_writes_point(monkeypatch):
+    sess = _FakeSession()
+    sess.add = MagicMock()
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", lambda: sess)
+
+    # Empty position set → snapshot still records a base-equity point.
+    class _Res:
+        def scalars(self):
+            return MagicMock(all=lambda: [])
+    sess.execute = AsyncMock(return_value=_Res())
+
+    await scheduler.equity_snapshot_job()
+    sess.add.assert_called_once()
+    assert sess.committed is True
+
+
 def test_build_scheduler_registers_jobs(monkeypatch):
     pytest.importorskip("apscheduler")
     monkeypatch.setattr("config.settings.self_evolve_asset_classes", "")
     sched = scheduler.build_scheduler(["equity"])
     try:
         ids = {j.id for j in sched.get_jobs()}
-        assert ids == {"label_and_evaluate", "train_and_propose"}
+        assert ids == {"label_and_evaluate", "train_and_propose", "equity_snapshot"}
     finally:
         sched.shutdown(wait=False) if sched.running else None

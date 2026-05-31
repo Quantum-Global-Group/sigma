@@ -66,6 +66,24 @@ async def label_and_evaluate_job(asset_classes: list[str]) -> None:
         await session.commit()
 
 
+async def equity_snapshot_job() -> None:
+    """Daily: record one point on the equity curve (account value + P&L)."""
+    from sqlalchemy import select
+
+    from db.models import Position
+    from risk.portfolio_pnl import snapshot_equity
+
+    async with AsyncSessionLocal() as session:
+        try:
+            rows = list((await session.execute(select(Position))).scalars().all())
+            snap = await snapshot_equity(session, rows, float(settings.default_equity))
+            await session.commit()
+            logger.info("[scheduler] equity snapshot: total_value=%.2f (%d positions)",
+                        float(snap.total_value), len(rows))
+        except Exception:
+            logger.exception("[scheduler] equity snapshot failed")
+
+
 async def train_and_propose_job(
     asset_classes: list[str],
     *,
@@ -158,6 +176,12 @@ def build_scheduler(asset_classes: list[str]):
         hours=settings.train_interval_hours, args=[classes],
         id="train_and_propose", next_run_time=None,
     )
-    logger.info("[scheduler] built with jobs for %s (label=%dh, train=%dh)",
-                classes, settings.label_interval_hours, settings.train_interval_hours)
+    scheduler.add_job(
+        equity_snapshot_job, "interval",
+        hours=settings.equity_snapshot_interval_hours,
+        id="equity_snapshot", next_run_time=None,
+    )
+    logger.info("[scheduler] built with jobs for %s (label=%dh, train=%dh, snapshot=%dh)",
+                classes, settings.label_interval_hours, settings.train_interval_hours,
+                settings.equity_snapshot_interval_hours)
     return scheduler

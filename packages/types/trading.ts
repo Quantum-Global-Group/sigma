@@ -1,4 +1,4 @@
-export type AssetClass = "equity" | "crypto" | "option";
+export type AssetClass = "equity" | "crypto" | "option" | "forex";
 
 export type Position = {
   id: string;
@@ -74,4 +74,29 @@ export type OptionExposure = {
   positions_count: number;
   greek_limits_ok: boolean;
   greek_breaches: string[];
+};
+
+export type AssetClassPnl = {
+  realized: number;
+  unrealized: number;
+  open_positions: number;
+  total: number;
+};
+
+export type PnlSummary = {
+  total_realized: number;
+  total_unrealized: number;
+  total_pnl: number;
+  open_positions: number;
+  by_asset_class: Record<string, AssetClassPnl>;
+  base_equity: number;
+  total_value: number;
+};
+
+export type EquityPoint = {
+  ts: string;
+  base_equity: number;
+  total_realized: number;
+  total_unrealized: number;
+  total_value: number;
 };

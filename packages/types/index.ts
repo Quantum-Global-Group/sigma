@@ -10,11 +10,14 @@ export type { TradeRecommendation, RebalanceMethod, RebalanceResponse } from "./
 export type { BacktestRequest, BacktestResult } from "./backtest";
 export type {
   AssetClass,
+  AssetClassPnl,
+  EquityPoint,
   ExecutionStatus,
   NetGreeks,
   OptionCandidate,
   OptionExposure,
   OptionPosition,
   Order,
+  PnlSummary,
   Position,
 } from "./trading";

@@ -4,11 +4,13 @@ import type {
   BacktestRequest,
   BacktestResult,
   CreateKeyResponse,
+  EquityPoint,
   ExecutionStatus,
   OptionCandidate,
   OptionExposure,
   OptionPosition,
   Order,
+  PnlSummary,
   Position,
   RebalanceResponse,
   SignalResponse,
@@ -175,6 +177,18 @@ export async function fetchOptionPositions(
 
 export async function fetchOptionExposure(apiKey: string): Promise<OptionExposure> {
   return apiFetch<OptionExposure>("/options/exposure", apiKey);
+}
+
+// ─── P&L (portfolio-level + equity curve) ────────────────────────────────────
+
+export type { PnlSummary, EquityPoint } from "@sigma/types";
+
+export async function fetchPortfolioPnl(apiKey: string): Promise<PnlSummary> {
+  return apiFetch<PnlSummary>("/portfolio/pnl", apiKey);
+}
+
+export async function fetchEquityCurve(apiKey: string, days: number = 30): Promise<EquityPoint[]> {
+  return apiFetch<EquityPoint[]>(`/portfolio/equity-curve?days=${days}`, apiKey);
 }
 
 /**

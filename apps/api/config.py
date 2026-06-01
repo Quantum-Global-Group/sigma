@@ -213,6 +213,15 @@ class Settings(BaseSettings):
     option_take_profit_pct: float = 1.0     # close after the premium doubles
     option_trailing_pct: float = 0.30
     option_trailing_activate_pct: float = 0.30
+    # Underlying-derived option exits (opt-in; all default off so behavior is
+    # unchanged). The worker computes the signal from the underlying bars and the
+    # option closes when its directional thesis breaks down.
+    option_use_atr_trailing: bool = False
+    option_atr_multiplier: float = 2.0
+    option_use_vol_regime_exit: bool = False
+    option_vol_spike_mult: float = 1.5      # recent vol / baseline vol ≥ this → exit
+    option_use_trend_reversal: bool = False
+    option_exit_lookback_bars: int = 20
 
     # Strategy combiner (razorBill multi-strategy)
     # Legacy global list — kept as a fallback when a per-asset list is empty.

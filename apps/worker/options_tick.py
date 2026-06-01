@@ -124,19 +124,21 @@ async def _manage_open_positions(session: AsyncSession, adapter) -> None:
         return
 
     now = datetime.now(timezone.utc)
-    spot_cache: dict[str, Optional[float]] = {}
+    bars_cache: dict[str, Optional[pd.DataFrame]] = {}
 
     for pos in positions:
         if not pos.underlying or pos.expiry is None or pos.strike is None or not pos.right:
             continue
-        spot = _underlying_spot(adapter, pos.underlying, spot_cache)
-        if spot is None:
+        df = _underlying_bars(adapter, pos.underlying, bars_cache)
+        if df is None or df.empty:
             continue
+        spot = float(df["close"].iloc[-1])
 
         T = max(0.0, (pos.expiry - now.date()).days / 365.0)
         sigma = _entry_iv(pos)
         hold_days = max(0, (now - _aware(pos.entry_ts)).days)
         meta = dict(pos.meta or {})
+        external = _external_exit_reason(df, pos.right)
 
         action = manage_position(
             entry_price=float(pos.entry_px), qty=float(pos.qty), right=pos.right,
@@ -149,6 +151,7 @@ async def _manage_open_positions(session: AsyncSession, adapter) -> None:
             take_profit_pct=settings.option_take_profit_pct,
             trailing_pct=settings.option_trailing_pct,
             trailing_activate_pct=settings.option_trailing_activate_pct,
+            external_exit=external,
         )
 
         pos.current_px = round(action.current_px, 6)
@@ -178,18 +181,71 @@ async def _manage_open_positions(session: AsyncSession, adapter) -> None:
             pos.meta = meta
 
 
-def _underlying_spot(adapter, underlying: str, cache: dict) -> Optional[float]:
+def _underlying_bars(adapter, underlying: str, cache: dict):
+    """Underlying OHLCV df (cached per tick). spot = last close; the bars also
+    drive the ATR/vol/trend exits."""
     if underlying in cache:
         return cache[underlying]
-    spot: Optional[float] = None
+    df = None
     try:
-        df = adapter.fetch_ohlcv(underlying, "daily")
-        if not df.empty:
-            spot = float(df["close"].iloc[-1])
+        out = adapter.fetch_ohlcv(underlying, "daily")
+        if out is not None and not out.empty:
+            df = out
     except Exception:
-        logger.debug("[option] spot fetch failed for %s", underlying, exc_info=True)
-    cache[underlying] = spot
-    return spot
+        logger.debug("[option] bars fetch failed for %s", underlying, exc_info=True)
+    cache[underlying] = df
+    return df
+
+
+def _atr(df: "pd.DataFrame", n: int) -> float:
+    """Average true range over the last n bars (Wilder-style simple mean)."""
+    h, low, c = df["high"], df["low"], df["close"]
+    prev_c = c.shift(1)
+    tr = pd.concat([(h - low), (h - prev_c).abs(), (low - prev_c).abs()], axis=1).max(axis=1)
+    atr = tr.tail(n).mean()
+    return float(atr) if atr == atr else 0.0   # NaN-safe
+
+
+def _external_exit_reason(df: "pd.DataFrame", right: str) -> Optional[str]:
+    """Underlying-derived exit reason (ATR-trailing / vol-regime / trend-reversal),
+    direction-aware for the option's thesis. Pure. None when no toggle fires.
+
+    A long call's thesis is bullish (exit when the underlying turns down); a long
+    put's is bearish (exit when it turns up). vol-regime is symmetric (long vega)."""
+    lookback = settings.option_exit_lookback_bars
+    closes = df["close"]
+    if len(closes) < 2 * lookback + 2:
+        return None
+    last = float(closes.iloc[-1])
+    bullish = right == "call"
+
+    if settings.option_use_atr_trailing:
+        atr = _atr(df, lookback)
+        if atr > 0:
+            if bullish:
+                stop = float(df["high"].tail(lookback).max()) - atr * settings.option_atr_multiplier
+                if last <= stop:
+                    return "atr_stop"
+            else:
+                stop = float(df["low"].tail(lookback).min()) + atr * settings.option_atr_multiplier
+                if last >= stop:
+                    return "atr_stop"
+
+    if settings.option_use_vol_regime_exit:
+        recent = realized_vol(closes.tail(lookback).tolist())
+        base = realized_vol(closes.iloc[-(2 * lookback):-lookback].tolist())
+        if base > 0 and recent / base >= settings.option_vol_spike_mult:
+            return "vol_regime"
+
+    if settings.option_use_trend_reversal:
+        short = float(closes.tail(5).mean())
+        prior = float(closes.iloc[-10:-5].mean())
+        if bullish and short < prior and last < prior:
+            return "trend_reversal"
+        if (not bullish) and short > prior and last > prior:
+            return "trend_reversal"
+
+    return None
 
 
 def _entry_iv(pos) -> float:

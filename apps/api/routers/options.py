@@ -281,7 +281,9 @@ async def option_exposure(
     for row in rows:
         greeks = {}
         if row.meta and isinstance(row.meta, dict):
-            greeks = row.meta.get("net_greeks", {})
+            # Multi-leg legs store per-leg Greeks already signed by side
+            # (meta.greeks); legacy single-leg rows used meta.net_greeks (long).
+            greeks = row.meta.get("greeks") or row.meta.get("net_greeks") or {}
         position_dicts.append({
             "greeks": greeks,
             "qty": float(row.qty),

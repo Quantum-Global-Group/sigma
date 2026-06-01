@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
@@ -143,13 +144,14 @@ async def _supervise_opend() -> bool:
 
 
 async def _manage_open_positions(session: AsyncSession, adapter) -> None:
-    """Mark-to-market, then exit (settle/stop/take-profit/trailing/time-stop) each
-    open option position.
+    """Mark-to-market then exit each open option position, coordinating multi-leg
+    structures so a spread/condor's legs close TOGETHER.
 
-    Reuses sim/options/lifecycle.manage_position. Theoretical valuation off the
-    underlying spot + entry IV avoids needing the broker-native contract code
-    (which isn't persisted). Closes book realized P&L + a settlement Order; the
-    trailing high-water mark persists in Position.meta between ticks."""
+    Two passes: (1) compute each leg's action via manage_position (side-aware via
+    meta.leg_side); (2) if any leg of a structure_id group closes, force-close the
+    rest of that group at their marks so the structure exits as one. Single-leg
+    positions (no structure_id) are applied directly. Reuses
+    sim/options/lifecycle.manage_position."""
     from sim.options.lifecycle import manage_position
 
     res = await session.execute(
@@ -162,6 +164,9 @@ async def _manage_open_positions(session: AsyncSession, adapter) -> None:
     now = datetime.now(timezone.utc)
     bars_cache: dict[str, Optional[pd.DataFrame]] = {}
 
+    # Pass 1 — compute each leg's action + remember its manage_position kwargs so a
+    # group-close can re-evaluate it as a forced close at mark.
+    computed: list[tuple] = []  # (pos, action, kwargs, meta)
     for pos in positions:
         if not pos.underlying or pos.expiry is None or pos.strike is None or not pos.right:
             continue
@@ -169,17 +174,15 @@ async def _manage_open_positions(session: AsyncSession, adapter) -> None:
         if df is None or df.empty:
             continue
         spot = float(df["close"].iloc[-1])
-
-        T = max(0.0, (pos.expiry - now.date()).days / 365.0)
-        sigma = _entry_iv(pos)
-        hold_days = max(0, (now - _aware(pos.entry_ts)).days)
         meta = dict(pos.meta or {})
-        external = _external_exit_reason(df, pos.right)
-
-        action = manage_position(
+        kwargs = dict(
             entry_price=float(pos.entry_px), qty=float(pos.qty), right=pos.right,
-            strike=float(pos.strike), spot=spot, T=T, sigma=sigma,
-            hold_days=hold_days, max_hold_days=settings.option_max_hold_days,
+            strike=float(pos.strike), spot=spot,
+            T=max(0.0, (pos.expiry - now.date()).days / 365.0),
+            sigma=_entry_iv(pos),
+            hold_days=max(0, (now - _aware(pos.entry_ts)).days),
+            max_hold_days=settings.option_max_hold_days,
+            side="short" if meta.get("leg_side") == "short" else "long",
             multiplier=int(pos.multiplier or 100),
             commission_per_contract=settings.option_commission_per_contract,
             high_water_value=meta.get("hw_value"),
@@ -187,34 +190,51 @@ async def _manage_open_positions(session: AsyncSession, adapter) -> None:
             take_profit_pct=settings.option_take_profit_pct,
             trailing_pct=settings.option_trailing_pct,
             trailing_activate_pct=settings.option_trailing_activate_pct,
-            external_exit=external,
+            external_exit=_external_exit_reason(df, pos.right),
         )
+        computed.append((pos, manage_position(**kwargs), kwargs, meta))
 
-        pos.current_px = round(action.current_px, 6)
-        if action.closes:
-            pos.realized_pnl = float(pos.realized_pnl) + action.realized_pnl
-            pos.unrealized_pnl = 0.0
-            pos.qty = 0.0
-            pos.closed = True
-            pos.closed_at = now
-            session.add(Order(
-                asset_class="option", symbol=pos.symbol, side="sell",
-                qty=0.0, px=round(action.current_px, 6), fee=action.commission,
-                executor="lifecycle", status="filled",
-                order_type="market", time_in_force="day",
-                underlying=pos.underlying, expiry=pos.expiry, strike=pos.strike,
-                right=pos.right, multiplier=pos.multiplier,
-                meta={"event": "close", "outcome": action.outcome,
-                      "realized_pnl": action.realized_pnl},
-            ))
-            logger.info("[option] %s closed (%s) realized=%.2f",
-                        pos.symbol, action.outcome, action.realized_pnl)
-        else:
-            pos.unrealized_pnl = round(action.unrealized_pnl, 6)
-            # Persist the trailing high-water mark for the next tick (reassign a
-            # new dict so SQLAlchemy flags the JSONB column dirty).
-            meta["hw_value"] = round(action.high_water_value, 6)
-            pos.meta = meta
+    # Structures with at least one leg closing this tick → close the whole group.
+    closing_structs = {
+        sid for pos, action, _kw, meta in computed
+        if action.closes and (sid := meta.get("structure_id"))
+    }
+
+    # Pass 2 — apply, forcing the remaining legs of a closing structure to exit.
+    for pos, action, kwargs, meta in computed:
+        sid = meta.get("structure_id")
+        if sid in closing_structs and not action.closes:
+            forced = {**kwargs, "external_exit": "structure_close"}
+            action = manage_position(**forced)
+        _apply_option_action(session, pos, action, now, meta)
+
+
+def _apply_option_action(session: AsyncSession, pos, action, now, meta: dict) -> None:
+    """Apply a manage_position result to a Position (close + settlement Order, or mark)."""
+    pos.current_px = round(action.current_px, 6)
+    if action.closes:
+        pos.realized_pnl = float(pos.realized_pnl) + action.realized_pnl
+        pos.unrealized_pnl = 0.0
+        pos.qty = 0.0
+        pos.closed = True
+        pos.closed_at = now
+        session.add(Order(
+            asset_class="option", symbol=pos.symbol, side="sell",
+            qty=0.0, px=round(action.current_px, 6), fee=action.commission,
+            executor="lifecycle", status="filled",
+            order_type="market", time_in_force="day",
+            underlying=pos.underlying, expiry=pos.expiry, strike=pos.strike,
+            right=pos.right, multiplier=pos.multiplier,
+            meta={"event": "close", "outcome": action.outcome,
+                  "realized_pnl": action.realized_pnl,
+                  "structure_id": meta.get("structure_id")},
+        ))
+        logger.info("[option] %s closed (%s) realized=%.2f",
+                    pos.symbol, action.outcome, action.realized_pnl)
+    else:
+        pos.unrealized_pnl = round(action.unrealized_pnl, 6)
+        meta["hw_value"] = round(action.high_water_value, 6)
+        pos.meta = meta   # reassign so SQLAlchemy flags the JSONB column dirty
 
 
 def _underlying_bars(adapter, underlying: str, cache: dict):
@@ -282,6 +302,24 @@ def _external_exit_reason(df: "pd.DataFrame", right: str) -> Optional[str]:
             return "trend_reversal"
 
     return None
+
+
+def _signed_leg_greeks(leg, spot: float, T: float, r: float = 0.05) -> dict:
+    """Per-contract Greeks for a structure leg, signed by side (long +, short −),
+    so summing leg positions yields the structure's net exposure. Quote Greeks
+    when present, else Black-Scholes from quote IV."""
+    q = leg.quote
+    sign = 1.0 if leg.side == "long" else -1.0
+    if None not in (q.delta, q.gamma, q.theta, q.vega):
+        g = {"delta": q.delta, "gamma": q.gamma, "theta": q.theta, "vega": q.vega}
+    else:
+        from options_math import bs_greeks
+        sigma = q.implied_vol if (q.implied_vol and q.implied_vol > 0) else 0.3
+        if sigma > 3:        # broker IV sometimes in percent
+            sigma /= 100.0
+        bg = bs_greeks(spot, q.contract.strike, max(T, 1e-6), r, sigma, q.contract.right)
+        g = {k: bg.get(k, 0.0) for k in ("delta", "gamma", "theta", "vega")}
+    return {k: round(float(v) * sign, 6) for k, v in g.items()}
 
 
 def _entry_iv(pos) -> float:
@@ -498,102 +536,76 @@ async def _process_underlying(
         rec.finalize("skipped")
         return
 
-    # ── 6. Place (paper) order ────────────────────────────────────────────────
-    # Use the lead leg's broker code as the order symbol; size = contracts.
-    lead_q = lead_leg.quote
-    occ = lead_q.contract.occ
+    # ── 6. Place (paper) order(s) — one per structure leg ─────────────────────
+    # Place every leg of the structure (BUY long / SELL short) as its own
+    # Position, all sharing one structure_id so they're tracked + settled
+    # together. Single-leg strategies (long_call/put) place exactly one.
     signal_ts = _last_bar_ts(feats)
-    client_oid = f"option:{underlying}:{top.strategy}:{_bucket(signal_ts)}"
+    base_oid = f"option:{underlying}:{top.strategy}:{_bucket(signal_ts)}"
+    structure_id = uuid.uuid4().hex
 
-    existing = await already_submitted(session, client_oid)
-    if existing is not None:
-        logger.info("[option] %s idempotent skip (client_order_id=%s)", underlying, client_oid)
+    # Idempotency on leg 0 collapses a re-tick of the same bar to one structure.
+    if await already_submitted(session, f"{base_oid}:leg0") is not None:
+        logger.info("[option] %s idempotent skip (%s)", underlying, base_oid)
         rec.finalize("skipped", reason="idempotent")
         return
 
-    intent = OrderIntent(
-        asset_class="option",
-        symbol=lead_q.contract.code,
-        side=Side.BUY,
-        order_type=OrderType.LIMIT,
-        qty=float(size.contracts),
-        limit_px=lead_q.mid,
-        time_in_force=TimeInForce.DAY,
-        signal_time=signal_ts,
-        client_order_id=client_oid,
-    )
+    placed_legs = 0
+    legs_summary: list[dict] = []
+    for i, leg in enumerate(top.structure.legs):
+        q = leg.quote
+        side = Side.BUY if leg.side == "long" else Side.SELL
+        leg_qty = float(size.contracts) * float(leg.qty)
+        leg_oid = f"{base_oid}:leg{i}"
+        intent = OrderIntent(
+            asset_class="option", symbol=q.contract.code, side=side,
+            order_type=OrderType.LIMIT, qty=leg_qty, limit_px=q.mid,
+            time_in_force=TimeInForce.DAY, signal_time=signal_ts, client_order_id=leg_oid,
+        )
+        try:
+            report = await executor.place(intent)
+        except Exception:
+            logger.exception("[option] %s leg%d place() raised", underlying, i)
+            continue
 
-    try:
-        report = await executor.place(intent)
-    except Exception as exc:
-        logger.exception("[option] %s place() raised", underlying)
-        rec.finalize("rejected", error=str(exc))
-        return
+        filled = report.filled_qty
+        avg_px = report.avg_fill_price or q.mid
+        fee = sum(f.commission for f in report.fills)
+        leg_greeks = _signed_leg_greeks(leg, spot, T)
+        leg_meta = {
+            "structure_id": structure_id, "leg_side": leg.side, "leg_index": i,
+            "strategy": top.strategy, "greeks": leg_greeks,
+            "entry_iv": q.implied_vol, "regime": regime.value,
+        }
 
-    filled = report.filled_qty
-    avg_px = report.avg_fill_price or lead_q.mid
-    fee = sum(f.commission for f in report.fills)
-
-    # Persist the order row with option metadata.
-    session.add(Order(
-        asset_class="option",
-        symbol=occ,
-        side="buy",
-        qty=filled if filled > 0 else float(size.contracts),
-        px=avg_px,
-        fee=fee,
-        slippage_bps=next((f.slippage_bps for f in report.fills if f.slippage_bps is not None), None),
-        executor=getattr(executor, "name", "unknown"),
-        external_id=report.order.order_id,
-        client_order_id=client_oid,
-        order_type="limit",
-        time_in_force="day",
-        limit_px=lead_q.mid,
-        status=report.order.status.value,
-        underlying=underlying,
-        expiry=lead_q.contract.expiry,
-        strike=lead_q.contract.strike,
-        right=lead_q.contract.right,
-        multiplier=lead_q.contract.multiplier,
-        meta={
-            "strategy": top.strategy,
-            "score": top.score,
-            "regime": regime.value,
-            "iv_rank": iv_rank_val,
-            "net_greeks": net.as_dict(),
-            "rationale": top.rationale,
-            "audit_ts": rec.ts,
-        },
-    ))
-
-    if filled > 0:
-        session.add(Position(
-            asset_class="option",
-            symbol=occ,
-            qty=filled,
-            entry_px=avg_px,
-            current_px=avg_px,
-            underlying=underlying,
-            expiry=lead_q.contract.expiry,
-            strike=lead_q.contract.strike,
-            right=lead_q.contract.right,
-            multiplier=lead_q.contract.multiplier,
-            meta={"strategy": top.strategy, "legs": len(top.structure.legs)},
+        session.add(Order(
+            asset_class="option", symbol=q.contract.occ, side=side.value,
+            qty=filled if filled > 0 else leg_qty, px=avg_px, fee=fee,
+            slippage_bps=next((f.slippage_bps for f in report.fills if f.slippage_bps is not None), None),
+            executor=getattr(executor, "name", "unknown"), external_id=report.order.order_id,
+            client_order_id=leg_oid, order_type="limit", time_in_force="day", limit_px=q.mid,
+            status=report.order.status.value, underlying=underlying, expiry=q.contract.expiry,
+            strike=q.contract.strike, right=q.contract.right, multiplier=q.contract.multiplier,
+            meta={**leg_meta, "score": top.score, "audit_ts": rec.ts},
         ))
+        if filled > 0:
+            session.add(Position(
+                asset_class="option", symbol=q.contract.occ, qty=filled, entry_px=avg_px,
+                current_px=avg_px, underlying=underlying, expiry=q.contract.expiry,
+                strike=q.contract.strike, right=q.contract.right, multiplier=q.contract.multiplier,
+                meta=leg_meta,
+            ))
+            placed_legs += 1
+        legs_summary.append({"leg": i, "side": leg.side, "occ": q.contract.occ,
+                             "filled": filled, "px": round(avg_px, 4)})
 
-    decision = "placed" if report.order.status == OrderStatus.FILLED else "submitted"
-    rec.finalize(
-        decision,
-        client_order_id=client_oid,
-        qty=filled,
-        px=avg_px,
-        strategy=top.strategy,
-        contracts=size.contracts,
-    )
-    logger.info(
-        "[option] %s %s %s x%d @ %.4f (score=%.3f regime=%s)",
-        underlying, decision, top.strategy, size.contracts, avg_px, top.score, regime.value,
-    )
+    n_legs = len(top.structure.legs)
+    decision = "placed" if placed_legs == n_legs else ("partial" if placed_legs else "submitted")
+    rec.finalize(decision, structure_id=structure_id, legs=legs_summary,
+                 strategy=top.strategy, contracts=size.contracts)
+    logger.info("[option] %s %s %s: %d/%d legs (id=%s, score=%.3f regime=%s)",
+                underlying, decision, top.strategy, placed_legs, n_legs,
+                structure_id[:8], top.score, regime.value)
 
 
 # ---------------------------------------------------------------------------

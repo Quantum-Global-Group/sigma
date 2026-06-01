@@ -19,6 +19,7 @@ untouched; this loop runs where OpenD is reachable (local or VPS lab).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -56,6 +57,13 @@ _halt_thresholds = HaltThresholds()
 async def options_tick_once(equity: Optional[float] = None) -> None:
     """Run one options cycle. Selects underlyings → chains → gates → place."""
     adapter = get_market_adapter("option")
+
+    # OpenD supervision: the chain/quote/exec paths all depend on the local
+    # gateway. Probe it first so a down gateway is recorded + skipped cleanly
+    # (and optionally restarted) rather than surfacing as slow SDK timeouts.
+    if settings.opend_check_enabled and not await _supervise_opend():
+        return
+
     if not adapter.is_market_open():
         logger.info("[option] market closed — skipping tick")
         return
@@ -104,6 +112,34 @@ async def options_tick_once(equity: Optional[float] = None) -> None:
             logger.exception("[option] audit persist failed")
 
         await session.commit()
+
+
+async def _supervise_opend() -> bool:
+    """Probe the OpenD gateway, record status, and (optionally) restart it.
+
+    Returns True when reachable (tick proceeds), False when down (tick skips).
+    A restart command runs only when configured — we never auto-restart a GUI
+    daemon by default."""
+    from cache.worker_status import write_opend_status
+    from markets.opend_health import check_opend
+
+    reachable, detail = await check_opend(settings.moomoo_host, settings.moomoo_port)
+    await write_opend_status(reachable, detail)
+    if reachable:
+        return True
+
+    logger.error("[option] OpenD unreachable (%s) — skipping tick", detail)
+    cmd = (settings.opend_restart_command or "").strip()
+    if cmd:
+        try:
+            logger.warning("[option] running opend_restart_command")
+            proc = await asyncio.create_subprocess_shell(
+                cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=30)
+        except Exception:
+            logger.exception("[option] opend restart command failed")
+    return False
 
 
 async def _manage_open_positions(session: AsyncSession, adapter) -> None:

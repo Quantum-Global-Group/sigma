@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from sqlalchemy import text
 
 from cache.redis import redis_ping
-from cache.worker_status import read_heartbeats
+from cache.worker_status import read_heartbeats, read_opend_status
 from config import settings
 from db.connection import AsyncSessionLocal
 
@@ -40,8 +40,12 @@ async def worker_health():
     writes each tick. A heartbeat is 'stale' once older than 2x its asset class's
     tick cadence. Overall status is ok only if every heartbeat is fresh + ok."""
     heartbeats = await read_heartbeats()
+    opend = await read_opend_status()
     if not heartbeats:
-        return {"status": "unknown", "detail": "no worker heartbeats found", "workers": {}}
+        out = {"status": "unknown", "detail": "no worker heartbeats found", "workers": {}}
+        if opend is not None:
+            out["opend"] = opend
+        return out
 
     now = datetime.now(timezone.utc)
     cadence = {
@@ -71,4 +75,8 @@ async def worker_health():
             "healthy": healthy,
         }
 
-    return {"status": "ok" if overall_ok else "degraded", "workers": workers}
+    out = {"status": "ok" if overall_ok else "degraded", "workers": workers}
+    # OpenD gateway reachability (options worker supervision), when probed.
+    if opend is not None:
+        out["opend"] = opend
+    return out

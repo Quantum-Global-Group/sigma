@@ -116,6 +116,11 @@ class Settings(BaseSettings):
     moomoo_security_firm: str = "FUTUINC"  # SecurityFirm.FUTUINC
     moomoo_paper: bool = True
     moomoo_allow_live: bool = False        # hard guardrail: live needs this true
+    # OpenD supervision — the options worker probes the gateway each tick. When it
+    # is unreachable the tick is skipped; if opend_restart_command is set it runs
+    # once (best-effort) to bring OpenD back. Empty = alert-only (no auto-restart).
+    opend_check_enabled: bool = True
+    opend_restart_command: str = ""
 
     # Execution + data — OANDA (forex) via the v20 REST API (oandapyV20). OANDA
     # is a cloud broker with practice + live environments; the adapter serves

@@ -19,7 +19,30 @@ logger = logging.getLogger(__name__)
 HEARTBEAT_PREFIX = "worker:heartbeat:"
 LOCK_KEY = "worker:singleton"
 PAUSE_PREFIX = "worker:pause:"
+OPEND_STATUS_KEY = "worker:opend"
 _PAUSE_TTL = 30 * 24 * 3600   # 30 days — effectively persistent, self-cleaning
+
+
+async def write_opend_status(reachable: bool, detail: str, ttl: int = 1800) -> None:
+    """Record the latest OpenD reachability probe. Best-effort — never raises."""
+    payload = {
+        "reachable": reachable,
+        "detail": detail,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await cache_set(OPEND_STATUS_KEY, payload, ttl=ttl)
+    except Exception:
+        logger.warning("opend status write failed", exc_info=True)
+
+
+async def read_opend_status() -> Optional[dict]:
+    """Return the last OpenD status payload, or None if never written / Redis down."""
+    try:
+        return await cache_get(OPEND_STATUS_KEY)
+    except Exception:
+        logger.warning("opend status read failed", exc_info=True)
+        return None
 
 
 def _heartbeat_key(asset_class: str) -> str:

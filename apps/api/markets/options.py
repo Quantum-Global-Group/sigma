@@ -185,5 +185,11 @@ def _quote_from_row(contract: OptionContract, row) -> OptionQuote:
 
 
 def get_option_data_provider() -> OptionDataProvider:
-    """Factory — currently Moomoo-only; mirrors get_market_adapter's shape."""
+    """Factory — Moomoo by default; OPTION_DATA_PROVIDER=synthetic yields the
+    offline synthetic chain (for no-credentials full runs). Mirrors
+    get_market_adapter's shape so the options worker stays broker-agnostic."""
+    import os
+    if (os.getenv("OPTION_DATA_PROVIDER") or "").lower() == "synthetic":
+        from sim.synthetic import SyntheticOptionData
+        return SyntheticOptionData()
     return MoomooOptionData()

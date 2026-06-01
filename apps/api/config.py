@@ -166,6 +166,15 @@ class Settings(BaseSettings):
     worker_tick_seconds_option: int = 900
     worker_tick_seconds_forex: int = 900   # H4 bars → slow cadence is fine
 
+    # Offline full-run mode: when true the worker installs synthetic market-data
+    # providers (sim/synthetic.py) so every asset class trades without network or
+    # broker creds. Forex still uses real OANDA when OANDA_API_TOKEN is set.
+    synthetic_data: bool = False
+    # Watchable-demo aid (NOT a strategy): emit confident directional signals so
+    # the full-run pipeline actually trades + populates the dashboard. Off by
+    # default; only meaningful alongside synthetic_data.
+    synthetic_demo_signals: bool = False
+
     # Fallback sizing equity when the executor can't report a live balance
     # (paper/sim venues). Alpaca reports its real account equity instead.
     default_equity: float = 10_000.0

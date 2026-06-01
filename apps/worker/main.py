@@ -167,8 +167,22 @@ def _init_sentry() -> None:
         logger.warning("Sentry init failed — continuing without it", exc_info=True)
 
 
+def _maybe_install_synthetic() -> None:
+    """Offline full-run: swap in synthetic market data so every asset class trades
+    without network/creds (forex keeps real OANDA when a token is set)."""
+    if not settings.synthetic_data:
+        return
+    try:
+        from sim.synthetic import install_synthetic_providers
+        installed = install_synthetic_providers()
+        logger.warning("SYNTHETIC_DATA on — synthetic providers for %s", installed)
+    except Exception:
+        logger.exception("failed to install synthetic providers")
+
+
 def main() -> None:
     _init_sentry()
+    _maybe_install_synthetic()
     asset_classes = _parse_asset_classes()
     if not asset_classes:
         logger.error("WORKER_ASSET_CLASSES is empty — nothing to do")

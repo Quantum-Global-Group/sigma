@@ -59,32 +59,8 @@ def record(name: str, ok: bool, detail: str = "") -> None:
     print(f"  [{'PASS' if ok else 'FAIL'}] {name}{(' — ' + detail) if detail else ''}")
 
 
-# ---------------------------------------------------------------------------
-# synthetic data
-# ---------------------------------------------------------------------------
-
-def _uptrend(n: int = 160, end: datetime | None = None) -> pd.DataFrame:
-    """A clean, steady uptrend so the combiner emits a confident BUY."""
-    end = end or datetime.now(timezone.utc)
-    idx = pd.date_range(end=end.date(), periods=n, freq="B", tz="UTC")
-    close = np.linspace(100.0, 160.0, n) + np.sin(np.arange(n) / 5.0) * 0.5
-    return pd.DataFrame({
-        "open": close - 0.3, "high": close + 0.6, "low": close - 0.6,
-        "close": close, "volume": np.full(n, 2_000_000.0),
-    }, index=idx)
-
-
-class _SyntheticEquityAdapter:
-    asset_class = "equity"
-
-    def fetch_ohlcv(self, symbol: str, timeframe: str = "daily") -> pd.DataFrame:
-        return _uptrend()
-
-    def is_market_open(self, ts=None) -> bool:
-        return True
-
-    def normalize_symbol(self, symbol: str) -> str:
-        return symbol.upper()
+# Synthetic equity adapter reused from the shared offline providers module.
+from sim.synthetic import SyntheticEquityAdapter as _SyntheticEquityAdapter  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

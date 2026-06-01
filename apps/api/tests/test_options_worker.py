@@ -242,7 +242,7 @@ async def test_options_tick_once_gate1_fails_on_empty_chain(monkeypatch):
     with patch("options_tick.get_market_adapter", return_value=mock_adapter), \
          patch("options_tick.get_universe_selector", return_value=mock_selector), \
          patch("options_tick.get_executor", return_value=mock_executor), \
-         patch("options_tick.MoomooOptionData", return_value=mock_option_data), \
+         patch("options_tick.get_option_data_provider", return_value=mock_option_data), \
          patch("options_tick.AsyncSessionLocal", return_value=mock_session):
         from options_tick import options_tick_once
         await options_tick_once()
@@ -291,7 +291,7 @@ async def test_options_tick_once_gate2_fails_on_low_confidence(monkeypatch):
     with patch("options_tick.get_market_adapter", return_value=mock_adapter), \
          patch("options_tick.get_universe_selector", return_value=mock_selector), \
          patch("options_tick.get_executor", return_value=mock_executor), \
-         patch("options_tick.MoomooOptionData", return_value=mock_option_data), \
+         patch("options_tick.get_option_data_provider", return_value=mock_option_data), \
          patch("options_tick.AsyncSessionLocal", return_value=mock_session), \
          patch("options_tick.build_default_combiner") as mock_combiner_fn, \
          patch("options_tick.combine_to_result", return_value=fake_result):

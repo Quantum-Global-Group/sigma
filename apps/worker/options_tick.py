@@ -36,7 +36,7 @@ from execution import get_executor
 from execution.base import ExecutionReport, OrderIntent, OrderStatus, OrderType, Side, TimeInForce
 from execution.idempotency import already_submitted
 from markets import get_market_adapter
-from markets.options import MoomooOptionData, OptionContract, OptionQuote
+from markets.options import OptionContract, OptionQuote, get_option_data_provider
 from ml.regime import Regime, RegimeDetector
 from ml.sequences import FeatureEngineer
 from ml.strategies import build_default_combiner, combine_to_result
@@ -59,10 +59,10 @@ async def options_tick_once(equity: Optional[float] = None) -> None:
     """Run one options cycle. Selects underlyings → chains → gates → place."""
     adapter = get_market_adapter("option")
 
-    # OpenD supervision: the chain/quote/exec paths all depend on the local
-    # gateway. Probe it first so a down gateway is recorded + skipped cleanly
-    # (and optionally restarted) rather than surfacing as slow SDK timeouts.
-    if settings.opend_check_enabled and not await _supervise_opend():
+    # OpenD supervision: the chain/quote/exec paths depend on the local gateway.
+    # Probe it first so a down gateway is recorded + skipped cleanly. Skipped in
+    # synthetic mode — there's no real OpenD when the option provider is synthetic.
+    if settings.opend_check_enabled and not settings.synthetic_data and not await _supervise_opend():
         return
 
     if not adapter.is_market_open():
@@ -78,7 +78,7 @@ async def options_tick_once(equity: Optional[float] = None) -> None:
     equity = await _resolve_equity(executor, equity)
     logger.info("[option] sizing equity = %.2f", equity)
 
-    option_data = MoomooOptionData()
+    option_data = get_option_data_provider()   # Moomoo, or synthetic when offline
     audit_log = AuditLog()
 
     async with AsyncSessionLocal() as session:
@@ -385,7 +385,8 @@ async def _process_underlying(
         regime = Regime.UNKNOWN
 
     # ── 3. Signal + IV rank ───────────────────────────────────────────────────
-    combiner = build_default_combiner("equity")
+    from sim.synthetic import demo_combiner_if_enabled
+    combiner = demo_combiner_if_enabled("equity", build_default_combiner)
     combined = combiner.combine_signals(underlying, feats, spot, model_predictions={})
     result = combine_to_result(combined)
 

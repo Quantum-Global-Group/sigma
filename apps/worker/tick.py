@@ -103,7 +103,8 @@ async def tick_once(asset_class: str, equity: Optional[float] = None) -> None:
     logger.info("[%s] tick: %d symbols", asset_class, len(symbols))
 
     executor = get_executor(asset_class)
-    combiner = build_default_combiner(asset_class)
+    from sim.synthetic import demo_combiner_if_enabled
+    combiner = demo_combiner_if_enabled(asset_class, build_default_combiner)
     fe = FeatureEngineer()
     equity = await _resolve_equity(executor, equity)
     logger.info("[%s] sizing equity = %.2f", asset_class, equity)

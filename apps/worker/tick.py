@@ -37,10 +37,16 @@ from markets import get_market_adapter
 from ml.sequences import FeatureEngineer
 from ml.strategies import build_default_combiner, combine_to_result
 from risk.exits import compute_exit_orders, compute_exit_orders_advanced
+from risk.kill_switch import KillSwitch
 from risk.sizing import PositionSizer
 from universe import get_universe_selector
 
 logger = logging.getLogger(__name__)
+
+# Process-wide kill switch for the standard (equity/crypto/forex) tick — halts
+# new BUY entries when tripped (exits still flow). Mirrors the options worker's
+# switch. Tripped by ops/preflight or future risk-anomaly wiring; reset to resume.
+_kill_switch = KillSwitch()
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +237,11 @@ async def _process_symbol(
     # 4. Rebuy cooldown — skip BUY if a SELL on this symbol fired recently.
     if result.signal == "BUY" and _in_cooldown(symbol, recent_sells):
         logger.info("[%s] %s in rebuy cooldown — skipping BUY", asset_class, symbol)
+        return
+
+    # 4b. Kill switch — halt new BUY entries when tripped (exits still flow).
+    if result.signal == "BUY" and not _kill_switch.allow_new_entries():
+        logger.warning("[%s] %s BUY blocked — kill switch: %s", asset_class, symbol, _kill_switch.reason)
         return
 
     # 5. Size + place order.
@@ -550,6 +561,14 @@ async def _submit_and_persist(
                 intent.asset_class, intent.symbol, intent.client_order_id,
             )
             return None, position
+
+    # Live-trading approval gate: a real-money order is blocked until a human
+    # approves the session (POST /execution/approve_live). Paper is never gated.
+    from execution.live_guard import block_reason
+    blocked = await block_reason(intent.asset_class, executor)
+    if blocked is not None:
+        logger.error("[%s] %s %s", intent.asset_class, intent.symbol, blocked)
+        return None, position
 
     report = await _place_with_retry(executor, intent)
     filled_qty = report.filled_qty

@@ -122,12 +122,15 @@ def manage_position(
     take_profit_pct: float = 0.0,
     trailing_pct: float = 0.0,
     trailing_activate_pct: float = 0.0,
+    external_exit: str | None = None,
 ) -> OptionAction:
-    """Decide settle / stop / take-profit / trailing / time-stop / mark for one held
-    option leg. Pure. Price-based exits act on the option's *premium* vs entry.
+    """Decide settle / stop / take-profit / trailing / external / time-stop / mark for
+    one held option leg. Pure. Price-based exits act on the option's *premium* vs entry;
+    `external_exit` is an underlying-derived reason (ATR/vol/trend) the caller computes.
 
     Priority: expiry settlement (T<=0) → stop-loss → take-profit → trailing-stop →
-    time-stop (hold_days>=max) → mark. Each price exit is disabled when its pct is 0."""
+    external → time-stop (hold_days>=max) → mark. Each price exit is disabled when its
+    pct is 0; external_exit is honored only when no premium exit already fired."""
     if T <= 0:
         s = settle_at_expiry(
             right=right, strike=strike, qty=qty, entry_price=entry_price,
@@ -155,6 +158,11 @@ def manage_position(
         and value <= hw * (1.0 - trailing_pct)                  # ...then pulled back
     ):
         return close("trailing_stop")
+
+    # Underlying-derived exit (ATR-trailing / vol-regime / trend-reversal), computed by
+    # the worker from the underlying bars so this stays pure + df-free.
+    if external_exit:
+        return close(external_exit)
 
     if hold_days >= max_hold_days:
         return close("time_stop")

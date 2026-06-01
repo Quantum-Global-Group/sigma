@@ -36,6 +36,9 @@ def fake_moomoo(monkeypatch):
     m.OpenQuoteContext = object
     m.OpenSecTradeContext = object
     monkeypatch.setitem(sys.modules, "moomoo", m)
+    # These tests exercise tick/gate logic, not the OpenD gateway probe — disable
+    # supervision so options_tick_once doesn't bail on an unreachable gateway.
+    monkeypatch.setattr("config.settings.opend_check_enabled", False)
     return m
 
 

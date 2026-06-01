@@ -104,6 +104,39 @@ async def resume(body: PauseRequest, auth: AuthDep):
     return PauseResponse(asset_class=body.asset_class, paused=False)
 
 
+class ApproveLiveRequest(BaseModel):
+    reason: str | None = None
+
+
+@router.get("/preflight")
+async def preflight(auth: AuthDep):
+    """Go-live readiness report (guardrail checks). Internal-only. Read-only —
+    enables nothing; just reports whether the safety rails are in place."""
+    _require_internal(auth)
+    from execution.live_guard import preflight as _preflight
+    return await _preflight()
+
+
+@router.post("/approve_live")
+async def approve_live(body: ApproveLiveRequest, auth: AuthDep):
+    """Approve real-money trading for this session (the first-live-order gate).
+    Internal-only. Live executors still require their own *_allow_live flags; this
+    is the human go-ahead on top. Flipping flags + funding remain manual."""
+    _require_internal(auth)
+    from execution.live_guard import approve_live as _approve
+    await _approve(reason=body.reason)
+    return {"live_approved": True, "reason": body.reason}
+
+
+@router.post("/revoke_live")
+async def revoke_live(auth: AuthDep):
+    """Revoke live approval immediately (back to paper-only). Internal-only."""
+    _require_internal(auth)
+    from execution.live_guard import revoke_live as _revoke
+    await _revoke()
+    return {"live_approved": False}
+
+
 def _require_internal(auth: AuthContext) -> None:
     if not auth.internal:
         raise HTTPException(

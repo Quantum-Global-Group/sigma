@@ -19,7 +19,9 @@ untouched; this loop runs where OpenD is reachable (local or VPS lab).
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
@@ -56,6 +58,13 @@ _halt_thresholds = HaltThresholds()
 async def options_tick_once(equity: Optional[float] = None) -> None:
     """Run one options cycle. Selects underlyings → chains → gates → place."""
     adapter = get_market_adapter("option")
+
+    # OpenD supervision: the chain/quote/exec paths all depend on the local
+    # gateway. Probe it first so a down gateway is recorded + skipped cleanly
+    # (and optionally restarted) rather than surfacing as slow SDK timeouts.
+    if settings.opend_check_enabled and not await _supervise_opend():
+        return
+
     if not adapter.is_market_open():
         logger.info("[option] market closed — skipping tick")
         return
@@ -106,14 +115,43 @@ async def options_tick_once(equity: Optional[float] = None) -> None:
         await session.commit()
 
 
-async def _manage_open_positions(session: AsyncSession, adapter) -> None:
-    """Mark-to-market, then exit (settle/stop/take-profit/trailing/time-stop) each
-    open option position.
+async def _supervise_opend() -> bool:
+    """Probe the OpenD gateway, record status, and (optionally) restart it.
 
-    Reuses sim/options/lifecycle.manage_position. Theoretical valuation off the
-    underlying spot + entry IV avoids needing the broker-native contract code
-    (which isn't persisted). Closes book realized P&L + a settlement Order; the
-    trailing high-water mark persists in Position.meta between ticks."""
+    Returns True when reachable (tick proceeds), False when down (tick skips).
+    A restart command runs only when configured — we never auto-restart a GUI
+    daemon by default."""
+    from cache.worker_status import write_opend_status
+    from markets.opend_health import check_opend
+
+    reachable, detail = await check_opend(settings.moomoo_host, settings.moomoo_port)
+    await write_opend_status(reachable, detail)
+    if reachable:
+        return True
+
+    logger.error("[option] OpenD unreachable (%s) — skipping tick", detail)
+    cmd = (settings.opend_restart_command or "").strip()
+    if cmd:
+        try:
+            logger.warning("[option] running opend_restart_command")
+            proc = await asyncio.create_subprocess_shell(
+                cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=30)
+        except Exception:
+            logger.exception("[option] opend restart command failed")
+    return False
+
+
+async def _manage_open_positions(session: AsyncSession, adapter) -> None:
+    """Mark-to-market then exit each open option position, coordinating multi-leg
+    structures so a spread/condor's legs close TOGETHER.
+
+    Two passes: (1) compute each leg's action via manage_position (side-aware via
+    meta.leg_side); (2) if any leg of a structure_id group closes, force-close the
+    rest of that group at their marks so the structure exits as one. Single-leg
+    positions (no structure_id) are applied directly. Reuses
+    sim/options/lifecycle.manage_position."""
     from sim.options.lifecycle import manage_position
 
     res = await session.execute(
@@ -124,24 +162,27 @@ async def _manage_open_positions(session: AsyncSession, adapter) -> None:
         return
 
     now = datetime.now(timezone.utc)
-    spot_cache: dict[str, Optional[float]] = {}
+    bars_cache: dict[str, Optional[pd.DataFrame]] = {}
 
+    # Pass 1 — compute each leg's action + remember its manage_position kwargs so a
+    # group-close can re-evaluate it as a forced close at mark.
+    computed: list[tuple] = []  # (pos, action, kwargs, meta)
     for pos in positions:
         if not pos.underlying or pos.expiry is None or pos.strike is None or not pos.right:
             continue
-        spot = _underlying_spot(adapter, pos.underlying, spot_cache)
-        if spot is None:
+        df = _underlying_bars(adapter, pos.underlying, bars_cache)
+        if df is None or df.empty:
             continue
-
-        T = max(0.0, (pos.expiry - now.date()).days / 365.0)
-        sigma = _entry_iv(pos)
-        hold_days = max(0, (now - _aware(pos.entry_ts)).days)
+        spot = float(df["close"].iloc[-1])
         meta = dict(pos.meta or {})
-
-        action = manage_position(
+        kwargs = dict(
             entry_price=float(pos.entry_px), qty=float(pos.qty), right=pos.right,
-            strike=float(pos.strike), spot=spot, T=T, sigma=sigma,
-            hold_days=hold_days, max_hold_days=settings.option_max_hold_days,
+            strike=float(pos.strike), spot=spot,
+            T=max(0.0, (pos.expiry - now.date()).days / 365.0),
+            sigma=_entry_iv(pos),
+            hold_days=max(0, (now - _aware(pos.entry_ts)).days),
+            max_hold_days=settings.option_max_hold_days,
+            side="short" if meta.get("leg_side") == "short" else "long",
             multiplier=int(pos.multiplier or 100),
             commission_per_contract=settings.option_commission_per_contract,
             high_water_value=meta.get("hw_value"),
@@ -149,47 +190,136 @@ async def _manage_open_positions(session: AsyncSession, adapter) -> None:
             take_profit_pct=settings.option_take_profit_pct,
             trailing_pct=settings.option_trailing_pct,
             trailing_activate_pct=settings.option_trailing_activate_pct,
+            external_exit=_external_exit_reason(df, pos.right),
         )
+        computed.append((pos, manage_position(**kwargs), kwargs, meta))
 
-        pos.current_px = round(action.current_px, 6)
-        if action.closes:
-            pos.realized_pnl = float(pos.realized_pnl) + action.realized_pnl
-            pos.unrealized_pnl = 0.0
-            pos.qty = 0.0
-            pos.closed = True
-            pos.closed_at = now
-            session.add(Order(
-                asset_class="option", symbol=pos.symbol, side="sell",
-                qty=0.0, px=round(action.current_px, 6), fee=action.commission,
-                executor="lifecycle", status="filled",
-                order_type="market", time_in_force="day",
-                underlying=pos.underlying, expiry=pos.expiry, strike=pos.strike,
-                right=pos.right, multiplier=pos.multiplier,
-                meta={"event": "close", "outcome": action.outcome,
-                      "realized_pnl": action.realized_pnl},
-            ))
-            logger.info("[option] %s closed (%s) realized=%.2f",
-                        pos.symbol, action.outcome, action.realized_pnl)
-        else:
-            pos.unrealized_pnl = round(action.unrealized_pnl, 6)
-            # Persist the trailing high-water mark for the next tick (reassign a
-            # new dict so SQLAlchemy flags the JSONB column dirty).
-            meta["hw_value"] = round(action.high_water_value, 6)
-            pos.meta = meta
+    # Structures with at least one leg closing this tick → close the whole group.
+    closing_structs = {
+        sid for pos, action, _kw, meta in computed
+        if action.closes and (sid := meta.get("structure_id"))
+    }
+
+    # Pass 2 — apply, forcing the remaining legs of a closing structure to exit.
+    for pos, action, kwargs, meta in computed:
+        sid = meta.get("structure_id")
+        if sid in closing_structs and not action.closes:
+            forced = {**kwargs, "external_exit": "structure_close"}
+            action = manage_position(**forced)
+        _apply_option_action(session, pos, action, now, meta)
 
 
-def _underlying_spot(adapter, underlying: str, cache: dict) -> Optional[float]:
+def _apply_option_action(session: AsyncSession, pos, action, now, meta: dict) -> None:
+    """Apply a manage_position result to a Position (close + settlement Order, or mark)."""
+    pos.current_px = round(action.current_px, 6)
+    if action.closes:
+        pos.realized_pnl = float(pos.realized_pnl) + action.realized_pnl
+        pos.unrealized_pnl = 0.0
+        pos.qty = 0.0
+        pos.closed = True
+        pos.closed_at = now
+        session.add(Order(
+            asset_class="option", symbol=pos.symbol, side="sell",
+            qty=0.0, px=round(action.current_px, 6), fee=action.commission,
+            executor="lifecycle", status="filled",
+            order_type="market", time_in_force="day",
+            underlying=pos.underlying, expiry=pos.expiry, strike=pos.strike,
+            right=pos.right, multiplier=pos.multiplier,
+            meta={"event": "close", "outcome": action.outcome,
+                  "realized_pnl": action.realized_pnl,
+                  "structure_id": meta.get("structure_id")},
+        ))
+        logger.info("[option] %s closed (%s) realized=%.2f",
+                    pos.symbol, action.outcome, action.realized_pnl)
+    else:
+        pos.unrealized_pnl = round(action.unrealized_pnl, 6)
+        meta["hw_value"] = round(action.high_water_value, 6)
+        pos.meta = meta   # reassign so SQLAlchemy flags the JSONB column dirty
+
+
+def _underlying_bars(adapter, underlying: str, cache: dict):
+    """Underlying OHLCV df (cached per tick). spot = last close; the bars also
+    drive the ATR/vol/trend exits."""
     if underlying in cache:
         return cache[underlying]
-    spot: Optional[float] = None
+    df = None
     try:
-        df = adapter.fetch_ohlcv(underlying, "daily")
-        if not df.empty:
-            spot = float(df["close"].iloc[-1])
+        out = adapter.fetch_ohlcv(underlying, "daily")
+        if out is not None and not out.empty:
+            df = out
     except Exception:
-        logger.debug("[option] spot fetch failed for %s", underlying, exc_info=True)
-    cache[underlying] = spot
-    return spot
+        logger.debug("[option] bars fetch failed for %s", underlying, exc_info=True)
+    cache[underlying] = df
+    return df
+
+
+def _atr(df: "pd.DataFrame", n: int) -> float:
+    """Average true range over the last n bars (Wilder-style simple mean)."""
+    h, low, c = df["high"], df["low"], df["close"]
+    prev_c = c.shift(1)
+    tr = pd.concat([(h - low), (h - prev_c).abs(), (low - prev_c).abs()], axis=1).max(axis=1)
+    atr = tr.tail(n).mean()
+    return float(atr) if atr == atr else 0.0   # NaN-safe
+
+
+def _external_exit_reason(df: "pd.DataFrame", right: str) -> Optional[str]:
+    """Underlying-derived exit reason (ATR-trailing / vol-regime / trend-reversal),
+    direction-aware for the option's thesis. Pure. None when no toggle fires.
+
+    A long call's thesis is bullish (exit when the underlying turns down); a long
+    put's is bearish (exit when it turns up). vol-regime is symmetric (long vega)."""
+    lookback = settings.option_exit_lookback_bars
+    closes = df["close"]
+    if len(closes) < 2 * lookback + 2:
+        return None
+    last = float(closes.iloc[-1])
+    bullish = right == "call"
+
+    if settings.option_use_atr_trailing:
+        atr = _atr(df, lookback)
+        if atr > 0:
+            if bullish:
+                stop = float(df["high"].tail(lookback).max()) - atr * settings.option_atr_multiplier
+                if last <= stop:
+                    return "atr_stop"
+            else:
+                stop = float(df["low"].tail(lookback).min()) + atr * settings.option_atr_multiplier
+                if last >= stop:
+                    return "atr_stop"
+
+    if settings.option_use_vol_regime_exit:
+        recent = realized_vol(closes.tail(lookback).tolist())
+        base = realized_vol(closes.iloc[-(2 * lookback):-lookback].tolist())
+        if base > 0 and recent / base >= settings.option_vol_spike_mult:
+            return "vol_regime"
+
+    if settings.option_use_trend_reversal:
+        short = float(closes.tail(5).mean())
+        prior = float(closes.iloc[-10:-5].mean())
+        if bullish and short < prior and last < prior:
+            return "trend_reversal"
+        if (not bullish) and short > prior and last > prior:
+            return "trend_reversal"
+
+    return None
+
+
+def _signed_leg_greeks(leg, spot: float, T: float, r: float = 0.05) -> dict:
+    """Per-contract Greeks for a structure leg, signed by side (long +, short −),
+    so summing leg positions yields the structure's net exposure. Quote Greeks
+    when present, else Black-Scholes from quote IV."""
+    q = leg.quote
+    sign = 1.0 if leg.side == "long" else -1.0
+    if None not in (q.delta, q.gamma, q.theta, q.vega):
+        g = {"delta": q.delta, "gamma": q.gamma, "theta": q.theta, "vega": q.vega}
+    else:
+        from options_math import bs_greeks
+        sigma = q.implied_vol if (q.implied_vol and q.implied_vol > 0) else 0.3
+        if sigma > 3:        # broker IV sometimes in percent
+            sigma /= 100.0
+        bg = bs_greeks(spot, q.contract.strike, max(T, 1e-6), r, sigma, q.contract.right)
+        g = {k: bg.get(k, 0.0) for k in ("delta", "gamma", "theta", "vega")}
+    return {k: round(float(v) * sign, 6) for k, v in g.items()}
 
 
 def _entry_iv(pos) -> float:
@@ -406,102 +536,85 @@ async def _process_underlying(
         rec.finalize("skipped")
         return
 
-    # ── 6. Place (paper) order ────────────────────────────────────────────────
-    # Use the lead leg's broker code as the order symbol; size = contracts.
-    lead_q = lead_leg.quote
-    occ = lead_q.contract.occ
+    # ── 6. Place (paper) order(s) — one per structure leg ─────────────────────
+    # Place every leg of the structure (BUY long / SELL short) as its own
+    # Position, all sharing one structure_id so they're tracked + settled
+    # together. Single-leg strategies (long_call/put) place exactly one.
     signal_ts = _last_bar_ts(feats)
-    client_oid = f"option:{underlying}:{top.strategy}:{_bucket(signal_ts)}"
+    base_oid = f"option:{underlying}:{top.strategy}:{_bucket(signal_ts)}"
+    structure_id = uuid.uuid4().hex
 
-    existing = await already_submitted(session, client_oid)
-    if existing is not None:
-        logger.info("[option] %s idempotent skip (client_order_id=%s)", underlying, client_oid)
+    # Idempotency on leg 0 collapses a re-tick of the same bar to one structure.
+    if await already_submitted(session, f"{base_oid}:leg0") is not None:
+        logger.info("[option] %s idempotent skip (%s)", underlying, base_oid)
         rec.finalize("skipped", reason="idempotent")
         return
 
-    intent = OrderIntent(
-        asset_class="option",
-        symbol=lead_q.contract.code,
-        side=Side.BUY,
-        order_type=OrderType.LIMIT,
-        qty=float(size.contracts),
-        limit_px=lead_q.mid,
-        time_in_force=TimeInForce.DAY,
-        signal_time=signal_ts,
-        client_order_id=client_oid,
-    )
-
-    try:
-        report = await executor.place(intent)
-    except Exception as exc:
-        logger.exception("[option] %s place() raised", underlying)
-        rec.finalize("rejected", error=str(exc))
+    # Live-trading approval gate (paper is never gated).
+    from execution.live_guard import block_reason
+    live_block = await block_reason("option", executor)
+    if live_block is not None:
+        logger.error("[option] %s %s", underlying, live_block)
+        rec.gate("G5_live", False, [live_block])
+        rec.finalize("skipped", reason="live_not_approved")
         return
 
-    filled = report.filled_qty
-    avg_px = report.avg_fill_price or lead_q.mid
-    fee = sum(f.commission for f in report.fills)
+    placed_legs = 0
+    legs_summary: list[dict] = []
+    for i, leg in enumerate(top.structure.legs):
+        q = leg.quote
+        side = Side.BUY if leg.side == "long" else Side.SELL
+        leg_qty = float(size.contracts) * float(leg.qty)
+        leg_oid = f"{base_oid}:leg{i}"
+        intent = OrderIntent(
+            asset_class="option", symbol=q.contract.code, side=side,
+            order_type=OrderType.LIMIT, qty=leg_qty, limit_px=q.mid,
+            time_in_force=TimeInForce.DAY, signal_time=signal_ts, client_order_id=leg_oid,
+        )
+        try:
+            report = await executor.place(intent)
+        except Exception:
+            logger.exception("[option] %s leg%d place() raised", underlying, i)
+            continue
 
-    # Persist the order row with option metadata.
-    session.add(Order(
-        asset_class="option",
-        symbol=occ,
-        side="buy",
-        qty=filled if filled > 0 else float(size.contracts),
-        px=avg_px,
-        fee=fee,
-        slippage_bps=next((f.slippage_bps for f in report.fills if f.slippage_bps is not None), None),
-        executor=getattr(executor, "name", "unknown"),
-        external_id=report.order.order_id,
-        client_order_id=client_oid,
-        order_type="limit",
-        time_in_force="day",
-        limit_px=lead_q.mid,
-        status=report.order.status.value,
-        underlying=underlying,
-        expiry=lead_q.contract.expiry,
-        strike=lead_q.contract.strike,
-        right=lead_q.contract.right,
-        multiplier=lead_q.contract.multiplier,
-        meta={
-            "strategy": top.strategy,
-            "score": top.score,
-            "regime": regime.value,
-            "iv_rank": iv_rank_val,
-            "net_greeks": net.as_dict(),
-            "rationale": top.rationale,
-            "audit_ts": rec.ts,
-        },
-    ))
+        filled = report.filled_qty
+        avg_px = report.avg_fill_price or q.mid
+        fee = sum(f.commission for f in report.fills)
+        leg_greeks = _signed_leg_greeks(leg, spot, T)
+        leg_meta = {
+            "structure_id": structure_id, "leg_side": leg.side, "leg_index": i,
+            "strategy": top.strategy, "greeks": leg_greeks,
+            "entry_iv": q.implied_vol, "regime": regime.value,
+        }
 
-    if filled > 0:
-        session.add(Position(
-            asset_class="option",
-            symbol=occ,
-            qty=filled,
-            entry_px=avg_px,
-            current_px=avg_px,
-            underlying=underlying,
-            expiry=lead_q.contract.expiry,
-            strike=lead_q.contract.strike,
-            right=lead_q.contract.right,
-            multiplier=lead_q.contract.multiplier,
-            meta={"strategy": top.strategy, "legs": len(top.structure.legs)},
+        session.add(Order(
+            asset_class="option", symbol=q.contract.occ, side=side.value,
+            qty=filled if filled > 0 else leg_qty, px=avg_px, fee=fee,
+            slippage_bps=next((f.slippage_bps for f in report.fills if f.slippage_bps is not None), None),
+            executor=getattr(executor, "name", "unknown"), external_id=report.order.order_id,
+            client_order_id=leg_oid, order_type="limit", time_in_force="day", limit_px=q.mid,
+            status=report.order.status.value, underlying=underlying, expiry=q.contract.expiry,
+            strike=q.contract.strike, right=q.contract.right, multiplier=q.contract.multiplier,
+            meta={**leg_meta, "score": top.score, "audit_ts": rec.ts},
         ))
+        if filled > 0:
+            session.add(Position(
+                asset_class="option", symbol=q.contract.occ, qty=filled, entry_px=avg_px,
+                current_px=avg_px, underlying=underlying, expiry=q.contract.expiry,
+                strike=q.contract.strike, right=q.contract.right, multiplier=q.contract.multiplier,
+                meta=leg_meta,
+            ))
+            placed_legs += 1
+        legs_summary.append({"leg": i, "side": leg.side, "occ": q.contract.occ,
+                             "filled": filled, "px": round(avg_px, 4)})
 
-    decision = "placed" if report.order.status == OrderStatus.FILLED else "submitted"
-    rec.finalize(
-        decision,
-        client_order_id=client_oid,
-        qty=filled,
-        px=avg_px,
-        strategy=top.strategy,
-        contracts=size.contracts,
-    )
-    logger.info(
-        "[option] %s %s %s x%d @ %.4f (score=%.3f regime=%s)",
-        underlying, decision, top.strategy, size.contracts, avg_px, top.score, regime.value,
-    )
+    n_legs = len(top.structure.legs)
+    decision = "placed" if placed_legs == n_legs else ("partial" if placed_legs else "submitted")
+    rec.finalize(decision, structure_id=structure_id, legs=legs_summary,
+                 strategy=top.strategy, contracts=size.contracts)
+    logger.info("[option] %s %s %s: %d/%d legs (id=%s, score=%.3f regime=%s)",
+                underlying, decision, top.strategy, placed_legs, n_legs,
+                structure_id[:8], top.score, regime.value)
 
 
 # ---------------------------------------------------------------------------

@@ -107,11 +107,13 @@ async def options_tick_once(equity: Optional[float] = None) -> None:
 
 
 async def _manage_open_positions(session: AsyncSession, adapter) -> None:
-    """Mark-to-market, settle (expiry), or time-stop each open option position.
+    """Mark-to-market, then exit (settle/stop/take-profit/trailing/time-stop) each
+    open option position.
 
     Reuses sim/options/lifecycle.manage_position. Theoretical valuation off the
     underlying spot + entry IV avoids needing the broker-native contract code
-    (which isn't persisted). Closes book realized P&L + a settlement Order."""
+    (which isn't persisted). Closes book realized P&L + a settlement Order; the
+    trailing high-water mark persists in Position.meta between ticks."""
     from sim.options.lifecycle import manage_position
 
     res = await session.execute(
@@ -134,6 +136,7 @@ async def _manage_open_positions(session: AsyncSession, adapter) -> None:
         T = max(0.0, (pos.expiry - now.date()).days / 365.0)
         sigma = _entry_iv(pos)
         hold_days = max(0, (now - _aware(pos.entry_ts)).days)
+        meta = dict(pos.meta or {})
 
         action = manage_position(
             entry_price=float(pos.entry_px), qty=float(pos.qty), right=pos.right,
@@ -141,6 +144,11 @@ async def _manage_open_positions(session: AsyncSession, adapter) -> None:
             hold_days=hold_days, max_hold_days=settings.option_max_hold_days,
             multiplier=int(pos.multiplier or 100),
             commission_per_contract=settings.option_commission_per_contract,
+            high_water_value=meta.get("hw_value"),
+            stop_loss_pct=settings.option_stop_loss_pct,
+            take_profit_pct=settings.option_take_profit_pct,
+            trailing_pct=settings.option_trailing_pct,
+            trailing_activate_pct=settings.option_trailing_activate_pct,
         )
 
         pos.current_px = round(action.current_px, 6)
@@ -157,13 +165,17 @@ async def _manage_open_positions(session: AsyncSession, adapter) -> None:
                 order_type="market", time_in_force="day",
                 underlying=pos.underlying, expiry=pos.expiry, strike=pos.strike,
                 right=pos.right, multiplier=pos.multiplier,
-                meta={"event": action.action, "outcome": action.outcome,
+                meta={"event": "close", "outcome": action.outcome,
                       "realized_pnl": action.realized_pnl},
             ))
-            logger.info("[option] %s %s realized=%.2f (%s)",
-                        pos.symbol, action.action, action.realized_pnl, action.outcome)
+            logger.info("[option] %s closed (%s) realized=%.2f",
+                        pos.symbol, action.outcome, action.realized_pnl)
         else:
             pos.unrealized_pnl = round(action.unrealized_pnl, 6)
+            # Persist the trailing high-water mark for the next tick (reassign a
+            # new dict so SQLAlchemy flags the JSONB column dirty).
+            meta["hw_value"] = round(action.high_water_value, 6)
+            pos.meta = meta
 
 
 def _underlying_spot(adapter, underlying: str, cache: dict) -> Optional[float]:

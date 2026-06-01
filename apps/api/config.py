@@ -205,6 +205,14 @@ class Settings(BaseSettings):
     # Max days to hold an option before a time-stop closes it at theoretical
     # value (the options worker also settles to intrinsic at expiry).
     option_max_hold_days: int = 21
+    # Price-based option exits, as a fraction of the entry premium (0 disables).
+    # stop closes when the mark falls to entry*(1-sl); take-profit at entry*(1+tp);
+    # trailing arms once the mark has gained trailing_activate, then closes on a
+    # trailing pullback from the high-water mark.
+    option_stop_loss_pct: float = 0.50      # close after losing half the premium
+    option_take_profit_pct: float = 1.0     # close after the premium doubles
+    option_trailing_pct: float = 0.30
+    option_trailing_activate_pct: float = 0.30
 
     # Strategy combiner (razorBill multi-strategy)
     # Legacy global list — kept as a fallback when a per-asset list is empty.

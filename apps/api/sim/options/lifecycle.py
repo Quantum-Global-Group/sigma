@@ -73,20 +73,33 @@ def settle_at_expiry(
 class OptionAction:
     """What to do with a held option leg this cycle.
 
-    action == "mark"      → still open; `unrealized_pnl` + `current_px` updated.
-    action == "settle"    → expired; `realized_pnl` booked, position closes.
-    action == "time_stop" → max hold reached; closed at theoretical value.
+    action == "mark"  → still open; `unrealized_pnl` + `current_px` updated.
+    action == "close" → position closes; `realized_pnl` booked. `outcome` says why
+                        (exercised/assigned/expired_worthless/time_stop/stop_loss/
+                        take_profit/trailing_stop).
     """
-    action: str                      # mark | settle | time_stop
+    action: str                      # mark | close
     current_px: float                # per-share theoretical (or intrinsic) value
     unrealized_pnl: float            # populated for "mark"; 0 once closing
-    realized_pnl: float              # populated for "settle" / "time_stop"
-    outcome: str                     # held | exercised | assigned | expired_worthless | time_stop
+    realized_pnl: float              # populated for "close"
+    outcome: str
     commission: float = 0.0
+    high_water_value: float = 0.0    # running max option value (for trailing); persist on "mark"
 
     @property
     def closes(self) -> bool:
-        return self.action in ("settle", "time_stop")
+        return self.action == "close"
+
+
+def _close_at_value(value, entry_price, qty, multiplier, side, commission_per_contract,
+                    outcome, high_water) -> "OptionAction":
+    """Book realized P&L closing a leg at `value` (theoretical mark)."""
+    commission = commission_per_contract * qty
+    sign = 1.0 if side == "long" else -1.0
+    realized = sign * (value - entry_price) * multiplier * qty - commission
+    return OptionAction("close", current_px=value, unrealized_pnl=0.0,
+                        realized_pnl=realized, outcome=outcome, commission=commission,
+                        high_water_value=high_water)
 
 
 def manage_position(
@@ -104,29 +117,49 @@ def manage_position(
     r: float = 0.05,
     multiplier: int = 100,
     commission_per_contract: float = 0.65,
+    high_water_value: float | None = None,
+    stop_loss_pct: float = 0.0,
+    take_profit_pct: float = 0.0,
+    trailing_pct: float = 0.0,
+    trailing_activate_pct: float = 0.0,
 ) -> OptionAction:
-    """Decide settle / time-stop / mark for one held option leg. Pure.
+    """Decide settle / stop / take-profit / trailing / time-stop / mark for one held
+    option leg. Pure. Price-based exits act on the option's *premium* vs entry.
 
-    Priority: expiry settlement (T<=0) → time stop (hold_days>=max) → mark."""
+    Priority: expiry settlement (T<=0) → stop-loss → take-profit → trailing-stop →
+    time-stop (hold_days>=max) → mark. Each price exit is disabled when its pct is 0."""
     if T <= 0:
         s = settle_at_expiry(
             right=right, strike=strike, qty=qty, entry_price=entry_price,
             S_expiry=spot, side=side, multiplier=multiplier,
             commission_per_contract=commission_per_contract,
         )
-        return OptionAction("settle", current_px=s.payoff, unrealized_pnl=0.0,
+        return OptionAction("close", current_px=s.payoff, unrealized_pnl=0.0,
                             realized_pnl=s.realized_pnl, outcome=s.outcome, commission=s.commission)
 
     value = option_value(right, spot, strike, T, r, sigma, american=True)
+    hw = max(high_water_value if high_water_value is not None else entry_price, value)
+
+    def close(outcome: str) -> OptionAction:
+        return _close_at_value(value, entry_price, qty, multiplier, side,
+                               commission_per_contract, outcome, hw)
+
+    # Price-based exits (long-option premium convention).
+    if stop_loss_pct > 0 and value <= entry_price * (1.0 - stop_loss_pct):
+        return close("stop_loss")
+    if take_profit_pct > 0 and value >= entry_price * (1.0 + take_profit_pct):
+        return close("take_profit")
+    if (
+        trailing_pct > 0
+        and hw >= entry_price * (1.0 + trailing_activate_pct)   # only after it ran up
+        and value <= hw * (1.0 - trailing_pct)                  # ...then pulled back
+    ):
+        return close("trailing_stop")
 
     if hold_days >= max_hold_days:
-        commission = commission_per_contract * qty
-        sign = 1.0 if side == "long" else -1.0
-        realized = sign * (value - entry_price) * multiplier * qty - commission
-        return OptionAction("time_stop", current_px=value, unrealized_pnl=0.0,
-                            realized_pnl=realized, outcome="time_stop", commission=commission)
+        return close("time_stop")
 
     sign = 1.0 if side == "long" else -1.0
     unreal = sign * (value - entry_price) * multiplier * qty
     return OptionAction("mark", current_px=value, unrealized_pnl=unreal,
-                        realized_pnl=0.0, outcome="held")
+                        realized_pnl=0.0, outcome="held", high_water_value=hw)

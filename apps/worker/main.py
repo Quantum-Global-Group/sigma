@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from config import settings  # noqa: E402
 from cache.worker_status import (  # noqa: E402
     acquire_singleton,
+    is_paused,
     refresh_singleton,
     write_heartbeat,
 )
@@ -82,19 +83,27 @@ async def run_loop(asset_classes: Iterable[str], stop: asyncio.Event) -> None:
         while not stop.is_set():
             t0 = time.monotonic()
             err: str | None = None
-            try:
-                await _run_tick(ac)
-            except Exception as exc:
-                err = f"{type(exc).__name__}: {exc}"
-                logger.exception("[%s] tick raised", ac)
 
-            await write_heartbeat(
-                ac,
-                duration_s=time.monotonic() - t0,
-                status="error" if err else "ok",
-                error=err,
-                ttl=interval * 4,
-            )
+            # Per-asset-class pause: skip the tick (but keep looping) so an
+            # operator can halt one venue via POST /execution/pause and resume
+            # it later without a redeploy.
+            if await is_paused(ac):
+                logger.info("[%s] paused — skipping tick", ac)
+                await write_heartbeat(ac, duration_s=0.0, status="paused", ttl=interval * 4)
+            else:
+                try:
+                    await _run_tick(ac)
+                except Exception as exc:
+                    err = f"{type(exc).__name__}: {exc}"
+                    logger.exception("[%s] tick raised", ac)
+
+                await write_heartbeat(
+                    ac,
+                    duration_s=time.monotonic() - t0,
+                    status="error" if err else "ok",
+                    error=err,
+                    ttl=interval * 4,
+                )
             if not await refresh_singleton(instance_id, lock_ttl):
                 logger.error("lost singleton lock — stopping worker")
                 stop.set()

@@ -16,11 +16,13 @@
 -- orders: option columns
 -- ---------------------------------------------------------------------------
 
+-- NOTE: "right" is a reserved SQL keyword — it must be double-quoted in raw SQL.
+-- (SQLAlchemy auto-quotes it in the ORM, which is why mocked tests never caught it.)
 ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS underlying   VARCHAR(20),
   ADD COLUMN IF NOT EXISTS expiry       DATE,
   ADD COLUMN IF NOT EXISTS strike       NUMERIC(12,4),
-  ADD COLUMN IF NOT EXISTS right        VARCHAR(4),
+  ADD COLUMN IF NOT EXISTS "right"      VARCHAR(4),
   ADD COLUMN IF NOT EXISTS multiplier   SMALLINT,
   ADD COLUMN IF NOT EXISTS meta         JSONB;
 
@@ -36,7 +38,7 @@ ALTER TABLE positions
   ADD COLUMN IF NOT EXISTS underlying   VARCHAR(20),
   ADD COLUMN IF NOT EXISTS expiry       DATE,
   ADD COLUMN IF NOT EXISTS strike       NUMERIC(12,4),
-  ADD COLUMN IF NOT EXISTS right        VARCHAR(4),
+  ADD COLUMN IF NOT EXISTS "right"      VARCHAR(4),
   ADD COLUMN IF NOT EXISTS multiplier   SMALLINT,
   ADD COLUMN IF NOT EXISTS meta         JSONB;
 
@@ -54,7 +56,7 @@ CREATE TABLE IF NOT EXISTS option_quotes (
   underlying      VARCHAR(20)       NOT NULL,
   expiry          DATE              NOT NULL,
   strike          NUMERIC(12,4)     NOT NULL,
-  right           VARCHAR(4)        NOT NULL,   -- "call" | "put"
+  "right"         VARCHAR(4)        NOT NULL,   -- "call" | "put"
   snapshot_ts     TIMESTAMPTZ       NOT NULL,
   bid             NUMERIC(12,4),
   ask             NUMERIC(12,4),
@@ -67,7 +69,7 @@ CREATE TABLE IF NOT EXISTS option_quotes (
   theta           NUMERIC(8,4),
   vega            NUMERIC(8,4),
   source          VARCHAR(32)       NOT NULL DEFAULT 'moomoo',
-  PRIMARY KEY (underlying, expiry, strike, right, snapshot_ts)
+  PRIMARY KEY (underlying, expiry, strike, "right", snapshot_ts)
 );
 
 SELECT create_hypertable('option_quotes', 'snapshot_ts', if_not_exists => TRUE);

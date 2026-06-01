@@ -40,3 +40,19 @@ def test_execution_status_reports_forex_cadence_and_pauses(client, auth_headers)
     body = r.json()
     assert "worker_asset_classes_default_forex_seconds" in body
     assert body["paused"] == ["forex"]
+
+
+# ── live-trading safety endpoints (internal-only) ────────────────────────────
+
+def test_preflight_requires_internal_secret(client, auth_headers):
+    assert client.get("/execution/preflight", headers=auth_headers).status_code == 403
+
+
+def test_approve_live_requires_internal_secret(client, auth_headers):
+    r = client.post("/execution/approve_live", headers=auth_headers, json={"reason": "x"})
+    assert r.status_code == 403
+    assert "internal" in r.json()["detail"].lower()
+
+
+def test_revoke_live_requires_internal_secret(client, auth_headers):
+    assert client.post("/execution/revoke_live", headers=auth_headers).status_code == 403

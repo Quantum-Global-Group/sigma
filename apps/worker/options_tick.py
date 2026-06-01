@@ -550,6 +550,15 @@ async def _process_underlying(
         rec.finalize("skipped", reason="idempotent")
         return
 
+    # Live-trading approval gate (paper is never gated).
+    from execution.live_guard import block_reason
+    live_block = await block_reason("option", executor)
+    if live_block is not None:
+        logger.error("[option] %s %s", underlying, live_block)
+        rec.gate("G5_live", False, [live_block])
+        rec.finalize("skipped", reason="live_not_approved")
+        return
+
     placed_legs = 0
     legs_summary: list[dict] = []
     for i, leg in enumerate(top.structure.legs):

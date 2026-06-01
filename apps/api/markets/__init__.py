@@ -11,6 +11,7 @@ from .base import MarketAdapter
 from .crypto import CoinbaseAdapter
 from .equity import EquityAdapter
 from .moomoo import MoomooAdapter
+from .oanda import OandaAdapter
 
 _REGISTRY: dict[str, MarketAdapter] = {
     "equity": EquityAdapter(),
@@ -18,6 +19,8 @@ _REGISTRY: dict[str, MarketAdapter] = {
     # Underlying OHLCV for the option asset class (option chains live behind
     # markets/options.py::OptionDataProvider, not this OHLCV adapter).
     "option": MoomooAdapter(),
+    # Forex (currency pairs) via OANDA v20 REST.
+    "forex": OandaAdapter(),
 }
 
 

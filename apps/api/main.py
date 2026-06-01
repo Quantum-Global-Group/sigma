@@ -13,6 +13,8 @@ from routers import (
     health,
     internal,
     keys,
+    models,
+    options,
     orders,
     portfolio,
     positions,
@@ -76,6 +78,8 @@ def create_app() -> FastAPI:
     app.include_router(positions.router)
     app.include_router(orders.router)
     app.include_router(execution.router)
+    app.include_router(options.router)
+    app.include_router(models.router)
 
     return app
 

@@ -47,6 +47,8 @@ async def worker_health():
     cadence = {
         "crypto": settings.worker_tick_seconds_crypto,
         "equity": settings.worker_tick_seconds_equity,
+        "option": settings.worker_tick_seconds_option,
+        "forex": settings.worker_tick_seconds_forex,
     }
     workers: dict[str, dict] = {}
     overall_ok = True
@@ -57,12 +59,15 @@ async def worker_health():
             age = None
         max_age = cadence.get(asset_class, 900) * 2
         stale = age is None or age > max_age
-        healthy = (hb.get("status") == "ok") and not stale
+        # A paused class is intentionally idle — fresh + paused is healthy, not degraded.
+        paused = hb.get("status") == "paused"
+        healthy = (hb.get("status") in ("ok", "paused")) and not stale
         overall_ok = overall_ok and healthy
         workers[asset_class] = {
             **hb,
             "age_seconds": round(age, 1) if age is not None else None,
             "stale": stale,
+            "paused": paused,
             "healthy": healthy,
         }
 

@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
 
+    # MLflow experiment tracking for *training* runs (Langfuse traces inference).
+    # Empty tracking URI → MLflow's local ./mlruns file store (no server needed).
+    mlflow_tracking_uri: str = ""
+    mlflow_experiment: str = "sigma-training"
+
     ibm_quantum_token: str = ""
     huggingface_token: str = ""
     iex_api_key: str = ""
@@ -75,9 +80,11 @@ class Settings(BaseSettings):
     #   crypto → coinbase | paper
     #   equity → alpaca   | paper
     #   option → moomoo   | paper
+    #   forex  → oanda    | paper
     crypto_executor: str = "paper"
     equity_executor: str = "paper"
     option_executor: str = "paper"
+    forex_executor: str = "paper"
     # Deprecated global toggle, kept as a fallback for older deploys. If set to
     # something other than "paper", it overrides the per-asset default for that
     # venue. New config should use crypto_executor / equity_executor.
@@ -113,6 +120,16 @@ class Settings(BaseSettings):
     moomoo_paper: bool = True
     moomoo_allow_live: bool = False        # hard guardrail: live needs this true
 
+    # Execution + data — OANDA (forex) via the v20 REST API (oandapyV20). OANDA
+    # is a cloud broker with practice + live environments; the adapter serves
+    # both OHLCV (mid candles) and execution (market orders, units-based).
+    oanda_api_token: str = ""
+    oanda_account_id: str = ""
+    oanda_environment: str = "practice"    # practice | live (data adapter)
+    oanda_paper: bool = True
+    oanda_allow_live: bool = False         # hard guardrail: live needs this true
+    oanda_order_timeout_seconds: int = 20
+
     # Execution — Coinbase Advanced Trade
     coinbase_api_key_name: str = ""
     coinbase_private_key: str = ""
@@ -144,10 +161,37 @@ class Settings(BaseSettings):
     # Worker live-loop cadence (seconds). Per-asset-class override via env.
     worker_tick_seconds_crypto: int = 300
     worker_tick_seconds_equity: int = 900
+    worker_tick_seconds_option: int = 900
+    worker_tick_seconds_forex: int = 900   # H4 bars → slow cadence is fine
 
     # Fallback sizing equity when the executor can't report a live balance
     # (paper/sim venues). Alpaca reports its real account equity instead.
     default_equity: float = 10_000.0
+
+    # Market-data harnessing — persist fetched OHLCV into the candles hypertable
+    # each tick so data is reusable for backfill/training. Only the tail is
+    # written per call (the upsert gap-fills); failures never break a tick.
+    persist_candles: bool = True
+    persist_candles_tail: int = 20
+
+    # Outcome labeling (ml/labeling.py) — how far forward to measure a signal's
+    # realized return, and the |return| below which an outcome is "flat".
+    label_horizon_bars: int = 5
+    label_flat_threshold: float = 0.001    # 10 bps
+
+    # Self-evolving model loop. Promotion is human-gated: the loop proposes a
+    # champion change when a candidate beats the incumbent by min_improvement on
+    # directional accuracy (with >= min_samples labeled signals); a human
+    # approves via /models/promotions before it goes live.
+    promotion_min_improvement: float = 0.02   # +2 pts directional accuracy
+    promotion_min_samples: int = 50
+    # Worker-internal scheduler (APScheduler) — runs only on the singleton holder.
+    worker_scheduler_enabled: bool = True
+    label_interval_hours: int = 24            # nightly: label outcomes + evaluate champion
+    train_interval_hours: int = 168           # weekly: train candidate + propose promotion
+    equity_snapshot_interval_hours: int = 24  # daily: record an equity-curve point
+    # Empty → defaults to the worker's WORKER_ASSET_CLASSES at runtime.
+    self_evolve_asset_classes: str = ""
 
     # Options risk layer (P5). Net-Greek caps are in share-equivalents
     # (contract-scaled); 0 disables a cap. IV-rank bands gate strategy choice.
@@ -161,6 +205,17 @@ class Settings(BaseSettings):
     option_min_volume: int = 10
     option_min_open_interest: int = 50
     option_commission_per_contract: float = 0.65
+    # Max days to hold an option before a time-stop closes it at theoretical
+    # value (the options worker also settles to intrinsic at expiry).
+    option_max_hold_days: int = 21
+    # Price-based option exits, as a fraction of the entry premium (0 disables).
+    # stop closes when the mark falls to entry*(1-sl); take-profit at entry*(1+tp);
+    # trailing arms once the mark has gained trailing_activate, then closes on a
+    # trailing pullback from the high-water mark.
+    option_stop_loss_pct: float = 0.50      # close after losing half the premium
+    option_take_profit_pct: float = 1.0     # close after the premium doubles
+    option_trailing_pct: float = 0.30
+    option_trailing_activate_pct: float = 0.30
 
     # Strategy combiner (razorBill multi-strategy)
     # Legacy global list — kept as a fallback when a per-asset list is empty.
@@ -170,9 +225,13 @@ class Settings(BaseSettings):
     # daily bars (dt=1/252) so they are equity-only; crypto runs 5m bars.
     crypto_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier"
     equity_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier,gbm,ou,heston,ict"
+    # Forex trades H4 bars, so the SDE strategies (gbm/ou/heston) — which assume
+    # daily bars (dt=1/252) — are excluded.
+    forex_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier"
     # Empty → combiner falls back to equal weights across the selected list.
     crypto_strategy_weights: str = ""
     equity_strategy_weights: str = ""
+    forex_strategy_weights: str = ""
     min_signal_confidence: float = 0.3
     strategy: StrategyParams = StrategyParams()
 

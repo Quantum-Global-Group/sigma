@@ -7,6 +7,8 @@ const ASSET_CLASSES: { value: AssetClass | "all"; label: string }[] = [
   { value: "all", label: "All" },
   { value: "crypto", label: "Crypto" },
   { value: "equity", label: "Equity" },
+  { value: "forex", label: "Forex" },
+  { value: "option", label: "Options" },
 ];
 
 function formatNum(n: number | null, fractionDigits = 4) {

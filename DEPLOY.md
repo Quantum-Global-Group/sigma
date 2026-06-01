@@ -1,23 +1,33 @@
 # SIGMA — Deployment Runbook
 
-Manual-but-repeatable path from `localhost` to a public, billable production deployment. Pair this with [docs/03_ENV_VARS.md](docs/03_ENV_VARS.md) for the full env-var reference and [docs/ROADMAP.md](docs/ROADMAP.md) for the milestone + sprint plan. For the equity (Alpaca paper) overlay see [docs/DEPLOY_EQUITY.md](docs/DEPLOY_EQUITY.md).
+Manual-but-repeatable path from `localhost` to a public, billable production deployment. Pair this with [docs/03_ENV_VARS.md](docs/03_ENV_VARS.md) for the full env-var reference and [docs/ROADMAP.md](docs/ROADMAP.md) for the milestone + sprint plan.
+
+**Per-asset-class overlays:** [docs/DEPLOY_EQUITY.md](docs/DEPLOY_EQUITY.md) (Alpaca paper) · [docs/DEPLOY_FOREX.md](docs/DEPLOY_FOREX.md) (OANDA, runs on Fly) · [docs/DEPLOY_OPTIONS.md](docs/DEPLOY_OPTIONS.md) (Moomoo — **local/VPS only**, OpenD can't run on Fly).
 
 ```mermaid
 flowchart LR
   GH[GitHub repo] --> Vercel
   GH --> FlyApi[Fly: sigma-api]
-  GH --> FlyWorker[Fly: sigma-worker]
+  GH --> FlyWorker[Fly: sigma-worker<br/>crypto/equity/forex]
   Vercel --> WebProd[apps/web prod]
   FlyApi --> Postgres[(Postgres + TimescaleDB)]
   FlyApi --> Redis[(Upstash Redis)]
   FlyWorker --> Postgres
   FlyWorker --> Redis
   FlyWorker --> Coinbase[(Coinbase Advanced Trade)]
+  FlyWorker --> OANDA[(OANDA v20 REST)]
+  OptWorker[Local/VPS worker<br/>options] --> Postgres
+  OptWorker --> Redis
+  OptWorker --> OpenD[(Moomoo OpenD<br/>127.0.0.1:11111)]
   WebProd --> FlyApi
   Stripe -->|webhook| WebProd
   Clerk -->|webhook| WebProd
   WebProd -->|"/internal/*"| FlyApi
 ```
+
+**Split topology:** crypto/equity/forex run on the Fly `sigma-worker` (all cloud APIs). Options run on a **separate local/VPS worker** next to a Moomoo OpenD gateway, sharing the same Postgres + Redis so it's one book. The global singleton lock + per-class heartbeats coordinate them; never run two workers covering the same asset class.
+
+**Pause / resume (no redeploy):** halt one asset class with `POST /execution/pause {"asset_class":"forex"}` (internal-secret gated) and re-enable with `/execution/resume`. The worker checks the Redis flag each loop iteration; `/health/worker` reports `status:"paused"` for that class. Useful around high-impact events or to isolate a misbehaving venue.
 
 ## 1. Provision infrastructure
 

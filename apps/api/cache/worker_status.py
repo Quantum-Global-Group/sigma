@@ -18,10 +18,56 @@ logger = logging.getLogger(__name__)
 
 HEARTBEAT_PREFIX = "worker:heartbeat:"
 LOCK_KEY = "worker:singleton"
+PAUSE_PREFIX = "worker:pause:"
+_PAUSE_TTL = 30 * 24 * 3600   # 30 days — effectively persistent, self-cleaning
 
 
 def _heartbeat_key(asset_class: str) -> str:
     return f"{HEARTBEAT_PREFIX}{asset_class}"
+
+
+def _pause_key(asset_class: str) -> str:
+    return f"{PAUSE_PREFIX}{asset_class}"
+
+
+async def set_pause(asset_class: str, paused: bool, reason: Optional[str] = None) -> None:
+    """Pause/resume one asset class without redeploying. The worker checks this
+    each loop iteration. No TTL — the flag persists until explicitly resumed."""
+    try:
+        r = get_redis()
+        key = _pause_key(asset_class)
+        if paused:
+            await cache_set(key, {"paused": True, "reason": reason,
+                                  "ts": datetime.now(timezone.utc).isoformat()}, _PAUSE_TTL)
+        else:
+            await r.delete(key)
+    except Exception:
+        logger.warning("set_pause failed for %s", asset_class, exc_info=True)
+
+
+async def is_paused(asset_class: str) -> bool:
+    """Whether `asset_class` is paused. Defaults to False on any Redis error so a
+    cache outage never silently halts trading."""
+    try:
+        return bool(await cache_get(_pause_key(asset_class)))
+    except Exception:
+        logger.warning("is_paused check failed for %s — assuming not paused", asset_class, exc_info=True)
+        return False
+
+
+async def read_pauses() -> dict[str, dict]:
+    """Return {asset_class: pause_payload} for every paused asset class."""
+    out: dict[str, dict] = {}
+    try:
+        r = get_redis()
+        async for key in r.scan_iter(match=f"{PAUSE_PREFIX}*"):
+            payload = await cache_get(key)
+            if payload:
+                ac = key.replace(PAUSE_PREFIX, "")
+                out[ac] = payload
+    except Exception:
+        logger.warning("read_pauses failed", exc_info=True)
+    return out
 
 
 async def write_heartbeat(

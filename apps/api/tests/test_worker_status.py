@@ -32,6 +32,10 @@ class _FakeRedis:
             if k.startswith(prefix):
                 yield k
 
+    async def delete(self, key):
+        self.store.pop(key, None)
+        return 1
+
 
 @pytest.fixture
 def fake_redis(monkeypatch):
@@ -121,6 +125,42 @@ def test_acquire_singleton_redis_down_proceeds(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# pause flag
+# ---------------------------------------------------------------------------
+
+def test_pause_then_resume(fake_redis):
+    async def go():
+        before = await ws.is_paused("forex")
+        await ws.set_pause("forex", True, reason="NFP")
+        during = await ws.is_paused("forex")
+        pauses = await ws.read_pauses()
+        await ws.set_pause("forex", False)
+        after = await ws.is_paused("forex")
+        return before, during, pauses, after
+    before, during, pauses, after = asyncio.run(go())
+    assert before is False
+    assert during is True
+    assert pauses["forex"]["reason"] == "NFP"
+    assert after is False
+
+
+def test_is_paused_defaults_false_on_redis_error(monkeypatch):
+    async def boom(*a, **k):
+        raise RuntimeError("redis down")
+    monkeypatch.setattr(ws, "cache_get", boom)
+    # A cache outage must never silently halt trading.
+    assert asyncio.run(ws.is_paused("forex")) is False
+
+
+def test_only_paused_classes_appear(fake_redis):
+    async def go():
+        await ws.set_pause("forex", True)
+        return await ws.read_pauses()
+    pauses = asyncio.run(go())
+    assert set(pauses) == {"forex"}
+
+
+# ---------------------------------------------------------------------------
 # GET /health/worker
 # ---------------------------------------------------------------------------
 
@@ -168,3 +208,14 @@ def test_worker_health_degraded_when_last_tick_errored(monkeypatch):
     out = asyncio.run(h.worker_health())
     assert out["status"] == "degraded"
     assert out["workers"]["equity"]["healthy"] is False
+
+
+def test_worker_health_paused_is_healthy_not_degraded(monkeypatch):
+    import routers.health as h
+    async def _hbs():
+        return {"forex": _hb("forex", "paused", age_s=10.0)}
+    monkeypatch.setattr(h, "read_heartbeats", _hbs)
+    out = asyncio.run(h.worker_health())
+    assert out["status"] == "ok"                       # paused ≠ degraded
+    assert out["workers"]["forex"]["paused"] is True
+    assert out["workers"]["forex"]["healthy"] is True

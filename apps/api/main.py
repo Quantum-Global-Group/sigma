@@ -19,6 +19,7 @@ from routers import (
     portfolio,
     positions,
     signals,
+    strategy_reports,
     usage,
 )
 
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(execution.router)
     app.include_router(options.router)
     app.include_router(models.router)
+    app.include_router(strategy_reports.router)
 
     return app
 

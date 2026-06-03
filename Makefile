@@ -81,7 +81,7 @@ worker:
 	docker compose logs -f worker
 
 worker-local:
-	cd apps/api && PYTHONPATH=. python -m worker.main
+	cd apps/api && PYTHONPATH=.:.. .venv/bin/python -c "from dotenv import load_dotenv; load_dotenv('.env'); import runpy; runpy.run_module('worker.main', run_name='__main__')"
 
 train-ranking:
 	cd apps/api && PYTHONPATH=. python scripts/train_ranking.py $(ARGS)

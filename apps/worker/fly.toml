@@ -18,7 +18,7 @@
 # Deploy:
 #   fly deploy
 
-app = "sigma-worker"
+app = "sigma-worker-proud-tree-92"
 primary_region = "ord"
 kill_signal = "SIGTERM"
 kill_timeout = "60s"  # let the current tick finish before stopping
@@ -33,9 +33,10 @@ kill_timeout = "60s"  # let the current tick finish before stopping
   # Comma-separated. Forex runs on Fly (OANDA is cloud REST); OPTIONS DO NOT —
   # Moomoo OpenD is a local gateway, so options run on a separate local/VPS
   # worker (see docs/DEPLOY_OPTIONS.md). Add "equity"/"forex" as secrets land.
-  WORKER_ASSET_CLASSES = "crypto"   # e.g. "crypto,equity,forex"
+  WORKER_ASSET_CLASSES = "equity"
   CRYPTO_EXECUTOR = "paper"         # flip to "coinbase" when ready
-  EQUITY_EXECUTOR = "paper"         # flip to "alpaca" when ready
+  EQUITY_EXECUTOR = "alpaca"
+  EQUITY_DATA_PROVIDERS = "alpaca,tiingo"
   FOREX_EXECUTOR = "paper"          # flip to "oanda" when ready (see DEPLOY_FOREX.md)
   WORKER_TICK_SECONDS_CRYPTO = "300"
   WORKER_TICK_SECONDS_EQUITY = "900"

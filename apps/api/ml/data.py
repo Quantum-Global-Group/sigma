@@ -1,7 +1,7 @@
 """Equity OHLCV fetch — thin shim over the equity MarketAdapter.
 
 Historically this called yfinance directly. It now delegates to the unified,
-multi-source equity adapter (Tiingo → Alpaca → yfinance) so that *training*
+multi-source equity adapter (Alpaca → Tiingo) so that *training*
 (train_models.py, backfill_signals.py, quantum/portfolio_optimizer.py) and
 *serving* (ml/pipeline.py, the worker) pull from the exact same bars.
 

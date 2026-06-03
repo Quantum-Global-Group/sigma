@@ -23,7 +23,7 @@ def _sample_df(n: int = 5) -> pd.DataFrame:
 def _stub_providers(monkeypatch, mapping, calls):
     """Rebind equity_data._PROVIDERS with call-recording stubs."""
     def make(name, result):
-        def _fn(symbol, timeframe):
+        def _fn(symbol, timeframe, *, start=None, end=None):
             calls.append(name)
             return result() if callable(result) else result
         return _fn
@@ -33,42 +33,42 @@ def _stub_providers(monkeypatch, mapping, calls):
 def test_provider_order_first_wins(monkeypatch):
     calls = []
     _stub_providers(monkeypatch, {
-        "tiingo": _sample_df, "alpaca": None, "yfinance": None,
+        "alpaca": _sample_df, "tiingo": None,
     }, calls)
-    monkeypatch.setattr("config.settings.equity_data_providers", "tiingo,alpaca,yfinance")
+    monkeypatch.setattr("config.settings.equity_data_providers", "alpaca,tiingo")
     df = equity_data.fetch_equity_ohlcv("AAPL", "daily")
     assert not df.empty
-    assert calls == ["tiingo"]  # short-circuits on first hit
+    assert calls == ["alpaca"]  # short-circuits on first hit
 
 
 def test_provider_falls_through_to_next(monkeypatch):
     calls = []
     _stub_providers(monkeypatch, {
-        "tiingo": None, "alpaca": _sample_df, "yfinance": None,
+        "alpaca": None, "tiingo": _sample_df,
     }, calls)
-    monkeypatch.setattr("config.settings.equity_data_providers", "tiingo,alpaca,yfinance")
+    monkeypatch.setattr("config.settings.equity_data_providers", "alpaca,tiingo")
     df = equity_data.fetch_equity_ohlcv("AAPL", "daily")
     assert not df.empty
-    assert calls == ["tiingo", "alpaca"]  # tiingo skipped, alpaca served
+    assert calls == ["alpaca", "tiingo"]  # alpaca skipped, tiingo served
 
 
 def test_all_providers_empty_raises(monkeypatch):
     calls = []
     _stub_providers(monkeypatch, {
-        "tiingo": None, "alpaca": None, "yfinance": None,
+        "alpaca": None, "tiingo": None,
     }, calls)
-    monkeypatch.setattr("config.settings.equity_data_providers", "tiingo,alpaca,yfinance")
+    monkeypatch.setattr("config.settings.equity_data_providers", "alpaca,tiingo")
     with pytest.raises(ValueError, match="No equity data"):
         equity_data.fetch_equity_ohlcv("AAPL", "daily")
 
 
 def test_unknown_provider_skipped(monkeypatch):
     calls = []
-    _stub_providers(monkeypatch, {"yfinance": _sample_df}, calls)
-    monkeypatch.setattr("config.settings.equity_data_providers", "bogus,yfinance")
+    _stub_providers(monkeypatch, {"tiingo": _sample_df}, calls)
+    monkeypatch.setattr("config.settings.equity_data_providers", "bogus,tiingo")
     df = equity_data.fetch_equity_ohlcv("AAPL", "daily")
     assert not df.empty
-    assert calls == ["yfinance"]
+    assert calls == ["tiingo"]
 
 
 def test_tiingo_no_key_returns_none(monkeypatch):

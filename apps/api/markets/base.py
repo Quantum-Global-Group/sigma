@@ -9,7 +9,7 @@ import pandas as pd
 class MarketAdapter(ABC):
     """Asset-class-specific market interface.
 
-    Implementations encapsulate the data source (yfinance / Coinbase / ...) and
+    Implementations encapsulate the data source (Alpaca/Tiingo / Coinbase / ...) and
     the calendar (24/7 vs market hours), so the rest of the pipeline can be
     written once."""
 

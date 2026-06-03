@@ -24,7 +24,7 @@ These block everything else. Don't write a line of product code without these in
 ### Frontend
 | Tool | Role | Why Now |
 |------|------|---------|
-| Next.js 15 | Full-stack React framework | Landing page, dashboard, docs, pricing |
+| Next.js 16 | Full-stack React framework | Landing page, dashboard, docs, pricing |
 | React 19 | UI layer | Server Components reduce bundle size |
 | Tailwind CSS | Styling | You already use this — zero learning curve |
 
@@ -62,7 +62,7 @@ Add these once the skeleton is deployed and your first endpoint is live.
 ### ML / Signals
 | Tool | Role | Notes |
 |------|------|-------|
-| yfinance | Free OHLCV market data | Stocks, ETFs, crypto — zero cost |
+| Tiingo | Equity OHLCV fallback | Daily + intraday via REST; needs API key |
 | pandas-ta | 130+ technical indicators | RSI, MACD, Bollinger, ATR in one line each |
 | PyTorch | Model training + inference | LSTM, Transformer, ensemble models |
 | scikit-learn | Classical ML + feature pipelines | Faster iteration than PyTorch for non-neural |
@@ -138,10 +138,10 @@ Do not touch these until you have consistent MRR and real scaling pressure.
 ```
 IDE:         Cursor + VS Code + Claude Code CLI
 Languages:   TypeScript (frontend/gateway) + Python 3.11 (ML/backend)
-Frontend:    Next.js 15 + React 19 + Tailwind + shadcn/ui + Recharts
+Frontend:    Next.js 16 + React 19 + Tailwind + shadcn/ui + Recharts
 Gateway:     Vercel Functions (TypeScript, auth + billing)
 Backend:     FastAPI + Pydantic v2 (Python, signals + ML + quantum)
-ML Core:     PyTorch + scikit-learn + yfinance + pandas-ta + CVXPY
+ML Core:     PyTorch + scikit-learn + Tiingo/Alpaca + pandas-ta + CVXPY
 Quantum:     Qiskit + PennyLane (your moat)
 Data:        PostgreSQL + TimescaleDB + Redis
 Auth:        Clerk

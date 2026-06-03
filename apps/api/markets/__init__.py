@@ -1,7 +1,7 @@
 """Market adapters — one per asset class.
 
 The pipeline calls `get_market_adapter(asset_class).fetch_ohlcv(...)` rather
-than reaching into yfinance/Coinbase directly. New asset classes plug in by
+than reaching into Tiingo/Alpaca/Coinbase directly. New asset classes plug in by
 implementing `MarketAdapter` and registering here.
 """
 

@@ -20,6 +20,7 @@ HEARTBEAT_PREFIX = "worker:heartbeat:"
 LOCK_KEY = "worker:singleton"
 PAUSE_PREFIX = "worker:pause:"
 OPEND_STATUS_KEY = "worker:opend"
+MT5_BRIDGE_STATUS_KEY = "worker:mt5_bridge"
 _PAUSE_TTL = 30 * 24 * 3600   # 30 days — effectively persistent, self-cleaning
 
 
@@ -42,6 +43,28 @@ async def read_opend_status() -> Optional[dict]:
         return await cache_get(OPEND_STATUS_KEY)
     except Exception:
         logger.warning("opend status read failed", exc_info=True)
+        return None
+
+
+async def write_mt5_bridge_status(reachable: bool, detail: str, ttl: int = 1800) -> None:
+    """Record the latest MT5 bridge reachability probe. Best-effort."""
+    payload = {
+        "reachable": reachable,
+        "detail": detail,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await cache_set(MT5_BRIDGE_STATUS_KEY, payload, ttl=ttl)
+    except Exception:
+        logger.warning("mt5 bridge status write failed", exc_info=True)
+
+
+async def read_mt5_bridge_status() -> Optional[dict]:
+    """Return the last MT5 bridge status payload, or None if never written."""
+    try:
+        return await cache_get(MT5_BRIDGE_STATUS_KEY)
+    except Exception:
+        logger.warning("mt5 bridge status read failed", exc_info=True)
         return None
 
 

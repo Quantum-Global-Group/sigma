@@ -36,6 +36,7 @@ from execution.idempotency import already_submitted
 from markets import get_market_adapter
 from ml.sequences import FeatureEngineer
 from ml.strategies import build_default_combiner, combine_to_result
+from risk.audit_log import AuditLog
 from risk.exits import compute_exit_orders, compute_exit_orders_advanced
 from risk.kill_switch import KillSwitch
 from risk.sizing import PositionSizer
@@ -100,14 +101,18 @@ async def tick_once(asset_class: str, equity: Optional[float] = None) -> None:
 
     selector = get_universe_selector(asset_class)
     symbols = selector.select()
+    if asset_class == "forex" and not await _supervise_mt5_bridge(symbols):
+        from markets.forex_routing import is_mt5_symbol
+        symbols = [s for s in symbols if not is_mt5_symbol(s)]
     logger.info("[%s] tick: %d symbols", asset_class, len(symbols))
+    if not symbols:
+        return
 
-    executor = get_executor(asset_class)
     combiner = build_default_combiner(asset_class)
     fe = FeatureEngineer()
-    equity = await _resolve_equity(executor, equity)
-    logger.info("[%s] sizing equity = %.2f", asset_class, equity)
-    sizer = PositionSizer(equity)
+    equity_by_executor: dict[str, float] = {}
+
+    audit_log = AuditLog()
 
     async with AsyncSessionLocal() as session:
         # Resolve the active (human-approved champion) model + its version so
@@ -120,29 +125,98 @@ async def tick_once(asset_class: str, equity: Optional[float] = None) -> None:
 
         for symbol in symbols:
             try:
+                symbol_adapter = _adapter_for_symbol(asset_class, symbol, adapter)
+                symbol_executor = _executor_for_symbol(asset_class, symbol)
+                executor_key = getattr(symbol_executor, "name", "unknown")
+                if executor_key not in equity_by_executor:
+                    equity_by_executor[executor_key] = await _resolve_equity(symbol_executor, equity)
+                    logger.info(
+                        "[%s] sizing equity via %s = %.2f",
+                        asset_class, executor_key, equity_by_executor[executor_key],
+                    )
+                sizer = PositionSizer(equity_by_executor[executor_key])
                 await _process_symbol(
                     session=session,
                     asset_class=asset_class,
                     symbol=symbol,
-                    adapter=adapter,
+                    adapter=symbol_adapter,
                     fe=fe,
                     combiner=combiner,
                     model=model,
                     model_version=model_version,
                     sizer=sizer,
-                    executor=executor,
+                    executor=symbol_executor,
                     open_position=positions.get(symbol),
                     exit_state=exit_states.get(symbol, {}),
                     recent_sells=recent_sells,
+                    audit_log=audit_log,
                 )
             except Exception:
                 logger.exception("[%s] %s tick failed", asset_class, symbol)
+
+        # Persist decision provenance (best-effort — never break the tick).
+        try:
+            from db.audit_store import persist_audit_log
+            n = await persist_audit_log(session, audit_log)
+            logger.info("[%s] persisted %d audit records", asset_class, n)
+        except Exception:
+            logger.exception("[%s] audit persist failed", asset_class)
+
         await session.commit()
+
+
+def _adapter_for_symbol(asset_class: str, symbol: str, default_adapter):
+    if asset_class == "forex":
+        from markets.forex_routing import get_forex_adapter
+        return get_forex_adapter(symbol)
+    return default_adapter
+
+
+def _executor_for_symbol(asset_class: str, symbol: str):
+    if asset_class == "forex":
+        from markets.forex_routing import get_forex_executor
+        return get_forex_executor(symbol)
+    return get_executor(asset_class)
+
+
+async def _supervise_mt5_bridge(symbols: list[str]) -> bool:
+    """Probe MT5 bridge when the forex universe contains MT5-routed symbols."""
+    from markets.forex_routing import is_mt5_symbol
+
+    if not any(is_mt5_symbol(s) for s in symbols):
+        return True
+    from cache.worker_status import write_mt5_bridge_status
+    from markets.mt5_bridge_health import check_mt5_bridge
+
+    reachable, detail = await check_mt5_bridge(
+        settings.mt5_bridge_url,
+        secret=settings.mt5_bridge_secret,
+        timeout=min(float(settings.mt5_bridge_timeout_seconds), 5.0),
+    )
+    await write_mt5_bridge_status(reachable, detail)
+    if not reachable:
+        logger.error("[forex] MT5 bridge unreachable (%s) — skipping MT5 symbols", detail)
+    return reachable
 
 
 # ---------------------------------------------------------------------------
 # per-symbol logic
 # ---------------------------------------------------------------------------
+
+def _snapshot_audit_features(feats: pd.DataFrame) -> dict:
+    """Last-bar feature snapshot for audit persistence (pure, testable)."""
+    if feats.empty:
+        return {}
+    row = feats.iloc[-1]
+    out: dict = {"px": float(row["c"]) if "c" in row.index else None}
+    for key in ("rsi", "atr", "mom_1", "mom_3", "vol_realized", "breakout_20"):
+        if key in row.index:
+            try:
+                out[key] = float(row[key])
+            except (TypeError, ValueError):
+                pass
+    return out
+
 
 async def _process_symbol(
     *,
@@ -159,10 +233,13 @@ async def _process_symbol(
     open_position: Optional[Position],
     exit_state: dict,
     recent_sells: dict[str, datetime],
+    audit_log: AuditLog,
 ) -> None:
+    rec = audit_log.new(symbol, asset_class=asset_class)
     timeframe = _default_timeframe(asset_class)
     df = adapter.fetch_ohlcv(symbol, timeframe)
     if df.empty:
+        rec.gate("G1_data", False, ["empty OHLCV"]).finalize("skipped")
         return
 
     # Harness the bars we just fetched (best-effort — never break the tick).
@@ -181,6 +258,14 @@ async def _process_symbol(
     feats = fe.compute(df)
     px_now = float(feats["c"].iloc[-1])
     signal_ts = _last_bar_ts(feats)
+
+    rec.gate("G1_data", True)
+    rec.data.update({
+        "source": getattr(adapter, "name", asset_class),
+        "timeframe": timeframe,
+        "bars": len(df),
+        "px": px_now,
+    })
 
     # 1. Exit check on any existing position before new entries.
     if open_position is not None:
@@ -212,7 +297,22 @@ async def _process_symbol(
         symbol, feats, px_now,
         model_predictions=_model_pred(model, symbol, df),
     )
-    result = combine_to_result(combined)
+    result = combine_to_result(combined, model_version=model_version)
+    rec.features.update(_snapshot_audit_features(feats))
+    rec.features.update({
+        "strength": combined.strength,
+        "confidence": result.confidence,
+        "component_signals": (result.component_weights or {}).get("component_signals", {}),
+    })
+    rec.signal.update({
+        "direction": result.signal,
+        "confidence": result.confidence,
+        "strength": combined.strength,
+        "predicted_return": result.predicted_return,
+        "model_version": model_version,
+    })
+    rec.strategy = (result.component_weights or {}).get("method", "combined")
+
     session.add(SignalHistory(
         user_id=settings.system_user_id,
         ticker=symbol,
@@ -227,28 +327,53 @@ async def _process_symbol(
 
     # 3. Entry gate: HOLD / low confidence / already long.
     if result.signal == "HOLD" or result.confidence < settings.min_signal_confidence:
+        reasons: list[str] = []
+        if result.signal == "HOLD":
+            reasons.append("HOLD signal")
+        if result.confidence < settings.min_signal_confidence:
+            reasons.append(
+                f"confidence {result.confidence:.2f} < {settings.min_signal_confidence}",
+            )
+        rec.gate("G2_signal", False, reasons)
+        rec.finalize("skipped")
         logger.info(
             "[%s] %s no-trade signal=%s conf=%.2f", asset_class, symbol, result.signal, result.confidence,
         )
         return
+    rec.gate("G2_signal", True)
+
     if open_position is not None and not open_position.closed and open_position.qty > 0 and result.signal == "BUY":
-        return  # already long; skip until exit
+        rec.gate("G3_position", False, ["already long"]).finalize("skipped")
+        return
+    rec.gate("G3_position", True)
 
     # 4. Rebuy cooldown — skip BUY if a SELL on this symbol fired recently.
     if result.signal == "BUY" and _in_cooldown(symbol, recent_sells):
+        rec.gate("G4_cooldown", False, ["rebuy cooldown active"]).finalize("skipped")
         logger.info("[%s] %s in rebuy cooldown — skipping BUY", asset_class, symbol)
         return
+    rec.gate("G4_cooldown", True)
 
     # 4b. Kill switch — halt new BUY entries when tripped (exits still flow).
     if result.signal == "BUY" and not _kill_switch.allow_new_entries():
+        rec.gate("G5_kill_switch", False, [f"kill switch: {_kill_switch.reason}"]).finalize("skipped")
         logger.warning("[%s] %s BUY blocked — kill switch: %s", asset_class, symbol, _kill_switch.reason)
         return
+    rec.gate("G5_kill_switch", True)
 
     # 5. Size + place order.
     sized = sizer.kelly_optimal(price=px_now, signal=combined.strength)
+    rec.risk.update({
+        "qty": sized.qty,
+        "notional": sized.notional,
+        "kelly_fraction": getattr(sized, "kelly_fraction", None),
+        "equity": sizer.equity,
+    })
     if sized.qty <= 0 or sized.notional <= 0:
+        rec.gate("G6_sizer", False, ["sizer returned zero qty"]).finalize("skipped")
         logger.info("[%s] %s sizer returned zero qty", asset_class, symbol)
         return
+    rec.gate("G6_sizer", True)
 
     side = Side.BUY if result.signal == "BUY" else Side.SELL
     intent = OrderIntent(
@@ -263,12 +388,32 @@ async def _process_symbol(
         client_order_id=_client_order_id(asset_class, symbol, side.value, signal_ts),
     )
 
-    report, affected = await _submit_and_persist(session, executor, intent, open_position)
+    report, affected, skip_reason = await _submit_and_persist(session, executor, intent, open_position)
+    if skip_reason == "idempotent":
+        rec.gate("G7_idempotent", False, ["already submitted this bar"]).finalize("skipped")
+        return
+    if skip_reason == "live_blocked":
+        from execution.live_guard import block_reason as _block_reason
+        blocked = await _block_reason(intent.asset_class, executor)
+        rec.gate("G7_live", False, [blocked or "live trading not approved"]).finalize("rejected")
+        return
     if report is None:
-        return  # idempotent skip — already submitted this bar
+        rec.finalize("skipped")
+        return
     if report.filled_qty <= 0:
+        rec.gate("G8_fill", False, ["zero fill"]).finalize("submitted", client_order_id=intent.client_order_id)
         logger.info("[%s] %s zero-fill", asset_class, symbol)
         return
+
+    rec.gate("G8_fill", True)
+    rec.finalize(
+        "placed",
+        client_order_id=intent.client_order_id,
+        side=side.value,
+        qty=report.filled_qty,
+        px=report.avg_fill_price or px_now,
+        status=report.order.status.value,
+    )
 
     if side == Side.BUY and affected is not None and not affected.closed:
         await _ensure_exit_state(session, affected.id, seed_high_water=float(affected.entry_px))
@@ -349,7 +494,7 @@ async def _maybe_exit(
             signal_time=signal_ts,
             client_order_id=_client_order_id(position.asset_class, position.symbol, f"exit{i}", signal_ts),
         )
-        await _submit_and_persist(session, executor, intent, position)
+        await _submit_and_persist(session, executor, intent, position)  # exits: no audit record
 
     # Persist the (possibly updated) ExitState row.
     await _persist_exit_state(session, position.id, merged_state)
@@ -549,10 +694,10 @@ async def _submit_and_persist(
     executor,
     intent: OrderIntent,
     position: Optional[Position],
-) -> tuple[Optional[ExecutionReport], Optional[Position]]:
+) -> tuple[Optional[ExecutionReport], Optional[Position], Optional[str]]:
     """Idempotency-check, submit, persist one Order row per intent, and apply
-    the aggregate fill to the position. Returns (report, affected_position).
-    Returns (None, position) when the intent was already submitted this bar."""
+    the aggregate fill to the position. Returns (report, affected_position, skip_reason).
+    skip_reason is set when the order was not submitted (idempotent | live_blocked)."""
     if intent.client_order_id:
         existing = await already_submitted(session, intent.client_order_id)
         if existing is not None:
@@ -560,7 +705,7 @@ async def _submit_and_persist(
                 "[%s] %s idempotent skip (client_order_id=%s)",
                 intent.asset_class, intent.symbol, intent.client_order_id,
             )
-            return None, position
+            return None, position, "idempotent"
 
     # Live-trading approval gate: a real-money order is blocked until a human
     # approves the session (POST /execution/approve_live). Paper is never gated.
@@ -568,7 +713,7 @@ async def _submit_and_persist(
     blocked = await block_reason(intent.asset_class, executor)
     if blocked is not None:
         logger.error("[%s] %s %s", intent.asset_class, intent.symbol, blocked)
-        return None, position
+        return None, position, "live_blocked"
 
     report = await _place_with_retry(executor, intent)
     filled_qty = report.filled_qty
@@ -597,7 +742,7 @@ async def _submit_and_persist(
     ))
 
     if filled_qty <= 0:
-        return report, position
+        return report, position, None
 
     affected = await _apply_fill_to_position(
         session,
@@ -608,7 +753,7 @@ async def _submit_and_persist(
         price=avg_px,
         existing=position,
     )
-    return report, affected
+    return report, affected, None
 
 
 async def _apply_fill_to_position(

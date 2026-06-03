@@ -5,7 +5,7 @@ class:
   crypto → settings.crypto_executor   (coinbase | paper)
   equity → settings.equity_executor   (alpaca   | paper)
   option → settings.option_executor   (moomoo   | paper)
-  forex  → settings.forex_executor    (oanda    | paper)
+  forex  → settings.forex_executor    (oanda | mt5 | paper)
 
 The legacy global `settings.executor_mode` still works as a fallback for
 older deploys: if it's set to something other than "paper" it overrides the
@@ -62,6 +62,9 @@ def get_executor(asset_class: str = "crypto") -> Executor:
     if mode == "oanda":
         from .oanda import OandaExecutor
         return OandaExecutor()
+    if mode in ("mt5", "mt5_bridge"):
+        from .mt5_bridge import Mt5BridgeExecutor
+        return Mt5BridgeExecutor()
     raise ValueError(f"Unknown executor mode {mode!r} for asset_class {asset_class!r}")
 
 

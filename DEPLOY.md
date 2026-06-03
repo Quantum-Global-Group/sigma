@@ -1,6 +1,6 @@
 # SIGMA — Deployment Runbook
 
-Manual-but-repeatable path from `localhost` to a public, billable production deployment. Pair this with [docs/03_ENV_VARS.md](docs/03_ENV_VARS.md) for the full env-var reference and [docs/ROADMAP.md](docs/ROADMAP.md) for the milestone + sprint plan.
+Manual-but-repeatable path from `localhost` to a public, billable production deployment. Pair this with [`03_ENV_VARS.md`](./03_ENV_VARS.md) for the full env-var reference and [`docs/ROADMAP.md`](./docs/ROADMAP.md) for the milestone + sprint plan.
 
 **Per-asset-class overlays:** [docs/DEPLOY_EQUITY.md](docs/DEPLOY_EQUITY.md) (Alpaca paper) · [docs/DEPLOY_FOREX.md](docs/DEPLOY_FOREX.md) (OANDA, runs on Fly) · [docs/DEPLOY_OPTIONS.md](docs/DEPLOY_OPTIONS.md) (Moomoo — **local/VPS only**, OpenD can't run on Fly).
 
@@ -27,7 +27,7 @@ flowchart LR
 
 **Split topology:** crypto/equity/forex run on the Fly `sigma-worker` (all cloud APIs). Options run on a **separate local/VPS worker** next to a Moomoo OpenD gateway, sharing the same Postgres + Redis so it's one book. The global singleton lock + per-class heartbeats coordinate them; never run two workers covering the same asset class.
 
-**Pause / resume (no redeploy):** halt one asset class with `POST /execution/pause {"asset_class":"forex"}` (internal-secret gated) and re-enable with `/execution/resume`. The worker checks the Redis flag each loop iteration; `/health/worker` reports `status:"paused"` for that class. Useful around high-impact events or to isolate a misbehaving venue.
+**Pause / resume (no redeploy):** halt one asset class with `POST /execution/pause {"asset_class":"forex"}` (internal-secret gated) and re-enable with `/execution/resume`. The worker checks the Redis flag each loop iteration; `/health/worker` reports `status:"paused"` for that class. Useful around high-impact events or to isolate a misbehaving venue. Full procedures: [`docs/RUNBOOK_WORKER.md`](./docs/RUNBOOK_WORKER.md).
 
 ## 1. Provision infrastructure
 

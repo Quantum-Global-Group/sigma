@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     #   crypto → coinbase | paper
     #   equity → alpaca   | paper
     #   option → moomoo   | paper
-    #   forex  → oanda    | paper
+    #   forex  → oanda | mt5 | paper
     crypto_executor: str = "paper"
     equity_executor: str = "paper"
     option_executor: str = "paper"
@@ -99,11 +99,10 @@ class Settings(BaseSettings):
 
     # Equity market data — multi-source with fallback. The EquityAdapter tries
     # providers left-to-right, skipping any whose credentials are missing, and
-    # returns the first non-empty result. yfinance is the last-resort fallback.
-    #   tiingo → api.tiingo.com (needs tiingo_api_key)
+    # returns the first non-empty result. Tiingo is the fallback when Alpaca fails.
     #   alpaca → alpaca-py StockHistoricalDataClient (reuses alpaca creds + feed)
-    #   yfinance → free, least reliable
-    equity_data_providers: str = "tiingo,alpaca,yfinance"
+    #   tiingo → api.tiingo.com (needs tiingo_api_key)
+    equity_data_providers: str = "alpaca,tiingo"
     tiingo_api_key: str = ""
     alpaca_order_timeout_seconds: int = 20
     alpaca_allow_fractional: bool = True
@@ -134,6 +133,20 @@ class Settings(BaseSettings):
     oanda_paper: bool = True
     oanda_allow_live: bool = False         # hard guardrail: live needs this true
     oanda_order_timeout_seconds: int = 20
+
+    # Execution + data — MT5 bridge (forex/CFD gateway hosted beside a Windows
+    # MetaTrader terminal, e.g. BlackBull demo on EvoX2). DGX talks HTTP; it does
+    # not import MetaTrader5 directly.
+    mt5_bridge_url: str = ""
+    mt5_bridge_secret: str = ""
+    mt5_bridge_timeout_seconds: float = 10.0
+    mt5_bridge_candle_count: int = 360
+    mt5_paper: bool = True
+    mt5_allow_live: bool = False
+    mt5_qty_is_lots: bool = False
+    mt5_units_per_lot: float = 100_000.0
+    mt5_deviation_points: int = 20
+    forex_mt5_symbols: str = ""
 
     # Execution — Coinbase Advanced Trade
     coinbase_api_key_name: str = ""
@@ -195,6 +208,10 @@ class Settings(BaseSettings):
     label_interval_hours: int = 24            # nightly: label outcomes + evaluate champion
     train_interval_hours: int = 168           # weekly: train candidate + propose promotion
     equity_snapshot_interval_hours: int = 24  # daily: record an equity-curve point
+    # Nightly signal embedding job (pgvector research foundation).
+    embed_signals_enabled: bool = False
+    embed_signals_interval_hours: int = 24
+    embed_signals_limit: int = 1000
     # Empty → defaults to the worker's WORKER_ASSET_CLASSES at runtime.
     self_evolve_asset_classes: str = ""
 

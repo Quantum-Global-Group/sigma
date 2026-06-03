@@ -32,6 +32,7 @@ _PAPER_FLAG = {
     "equity": lambda: settings.alpaca_paper,
     "option": lambda: settings.moomoo_paper,
     "forex": lambda: settings.oanda_paper,
+    "forex_mt5": lambda: settings.mt5_paper,
     "crypto": lambda: settings.coinbase_sandbox,
 }
 
@@ -41,7 +42,8 @@ def is_live_order(asset_class: str, executor) -> bool:
     AND the venue's paper flag is off)."""
     if getattr(executor, "name", "paper") == "paper":
         return False
-    is_paper = _PAPER_FLAG.get(asset_class, lambda: True)()
+    key = "forex_mt5" if asset_class == "forex" and getattr(executor, "name", "") == "mt5_bridge" else asset_class
+    is_paper = _PAPER_FLAG.get(key, lambda: True)()
     return not is_paper
 
 
@@ -130,6 +132,7 @@ async def preflight() -> dict:
         "equity": ("alpaca", settings.alpaca_paper, settings.alpaca_allow_live),
         "option": ("moomoo", settings.moomoo_paper, settings.moomoo_allow_live),
         "forex": ("oanda", settings.oanda_paper, settings.oanda_allow_live),
+        "forex_mt5": ("mt5_bridge", settings.mt5_paper, settings.mt5_allow_live),
     }
     modes = {ac: ("LIVE" if (not paper and allow) else "paper")
              for ac, (_v, paper, allow) in venues.items()}

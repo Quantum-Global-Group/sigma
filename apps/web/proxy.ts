@@ -19,14 +19,14 @@ const clerkHandler = clerkMiddleware(async (auth, req) => {
   }
 });
 
-export default function middleware(req: NextRequest, event: NextFetchEvent) {
+export default function proxy(req: NextRequest, event: NextFetchEvent) {
   if (!isClerkConfigured()) {
     return NextResponse.next();
   }
   return clerkHandler(req, event);
 }
 
-export const config = {
+export const proxyConfig = {
   matcher: [
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/(api|trpc)(.*)",

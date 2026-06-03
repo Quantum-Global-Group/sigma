@@ -66,6 +66,24 @@ async def label_and_evaluate_job(asset_classes: list[str]) -> None:
         await session.commit()
 
 
+async def embed_signals_job() -> None:
+    """Nightly: embed labeled signal_history rows into pgvector (when enabled)."""
+    if not settings.embed_signals_enabled:
+        return
+    try:
+        import importlib.util
+        path = os.path.join(_API_DIR, "scripts", "embed_signals.py")
+        spec = importlib.util.spec_from_file_location("embed_signals", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        async with AsyncSessionLocal() as session:
+            n = await mod.embed_unlabeled(session, limit=settings.embed_signals_limit)
+            await session.commit()
+        logger.info("[scheduler] embedded %d signal rows", n)
+    except Exception:
+        logger.exception("[scheduler] embed_signals failed")
+
+
 async def equity_snapshot_job() -> None:
     """Daily: record one point on the equity curve (account value + P&L)."""
     from sqlalchemy import select
@@ -181,7 +199,13 @@ def build_scheduler(asset_classes: list[str]):
         hours=settings.equity_snapshot_interval_hours,
         id="equity_snapshot", next_run_time=None,
     )
-    logger.info("[scheduler] built with jobs for %s (label=%dh, train=%dh, snapshot=%dh)",
+    if settings.embed_signals_enabled:
+        scheduler.add_job(
+            embed_signals_job, "interval",
+            hours=settings.embed_signals_interval_hours,
+            id="embed_signals", next_run_time=None,
+        )
+    logger.info("[scheduler] built with jobs for %s (label=%dh, train=%dh, snapshot=%dh, embed=%s)",
                 classes, settings.label_interval_hours, settings.train_interval_hours,
-                settings.equity_snapshot_interval_hours)
+                settings.equity_snapshot_interval_hours, settings.embed_signals_enabled)
     return scheduler

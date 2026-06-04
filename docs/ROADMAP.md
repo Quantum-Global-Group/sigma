@@ -305,12 +305,15 @@ Unsorted, untimed. Items move into a sprint when they earn it. Tagged by area fo
 
 ### Documentation
 
+- ~~**Production readiness research pack**~~ — **done**: [`docs/production/`](production/) (portfolio test matrix, measurement gaps, code-freeze baseline, cutoff checklist)
 - ~~`docs/MODELS.md`~~ — **done**: features, registry, training, worker wiring, retrain cadence
 - ~~equity deploy runbook~~ — **done**: [`docs/DEPLOY_EQUITY.md`](DEPLOY_EQUITY.md)
 - ~~**`docs/05_API_REFERENCE.md`**~~ — **done**: trading/ops in [`05_API_REFERENCE.md`](../05_API_REFERENCE.md); `docs/05` index links to canonical root doc
 - ~~**`docs/decisions/`** ADR~~ — **done**: [`docs/decisions/001-squash-vs-rebase.md`](decisions/001-squash-vs-rebase.md) (Sprint 0 merge strategy)
 - ~~**Runbook: worker stop safely**~~ — **done**: [`docs/RUNBOOK_WORKER.md`](RUNBOOK_WORKER.md)
 - ~~**Schema supplement 005–012**~~ — **done**: [`docs/DATABASE_SCHEMA.md`](DATABASE_SCHEMA.md) (companion to root [`04_DATABASE_SCHEMA.md`](../04_DATABASE_SCHEMA.md))
+- ~~**Account connections reference**~~ — **done**: [`docs/01_ACCOUNTS.md`](01_ACCOUNTS.md) (all 10 accounts, env vars, verification commands)
+- ~~**Strategy reference & testing guide**~~ — **done**: [`docs/02_STRATEGIES.md`](02_STRATEGIES.md) (per-asset-class strategy lists, options pipeline, test commands)
 
 ### Open product questions
 

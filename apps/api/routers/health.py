@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from sqlalchemy import text
 
 from cache.redis import redis_ping
-from cache.worker_status import read_heartbeats, read_opend_status
+from cache.worker_status import read_heartbeats, read_mt5_bridge_status, read_opend_status
 from config import settings
 from db.connection import AsyncSessionLocal
 
@@ -41,10 +41,13 @@ async def worker_health():
     tick cadence. Overall status is ok only if every heartbeat is fresh + ok."""
     heartbeats = await read_heartbeats()
     opend = await read_opend_status()
+    mt5_bridge = await read_mt5_bridge_status()
     if not heartbeats:
         out = {"status": "unknown", "detail": "no worker heartbeats found", "workers": {}}
         if opend is not None:
             out["opend"] = opend
+        if mt5_bridge is not None:
+            out["mt5_bridge"] = mt5_bridge
         return out
 
     now = datetime.now(timezone.utc)
@@ -79,4 +82,6 @@ async def worker_health():
     # OpenD gateway reachability (options worker supervision), when probed.
     if opend is not None:
         out["opend"] = opend
+    if mt5_bridge is not None:
+        out["mt5_bridge"] = mt5_bridge
     return out

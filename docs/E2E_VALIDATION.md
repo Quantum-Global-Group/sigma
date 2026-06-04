@@ -18,7 +18,7 @@ mocked unit tests. Three layers, increasing in what they touch:
 
 ## A. Offline smoke (automated — no creds, no network)
 
-Brings up TimescaleDB + Redis, applies migrations `001–011`, seeds the system/dev user, and runs
+Brings up TimescaleDB + Redis, applies migrations `001–012`, seeds the system/dev user, and runs
 the full loop with a **synthetic market adapter** + the **paper executor**, asserting real rows
 land in every table:
 
@@ -53,6 +53,56 @@ E2E_DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/sigma \
 `make e2e-down` stops the containers (data persists in the volume; `make clean` wipes it).
 
 ---
+
+## Audit & strategy reports (equity-first)
+
+After an equity, crypto, or forex tick (`tick_once(...)` or the worker loop), every
+symbol evaluation is persisted to `audit_records` with gate outcomes (G1_data → G8_fill)
+and a final decision (`placed`, `skipped`, or `rejected`). Options use the same table
+via `options_tick.py`. Query recent equity audit rows:
+
+```bash
+docker compose exec -T postgres psql -U postgres -d sigma -c \
+  "SELECT ts, symbol, decision, gates->-1 AS last_gate, signal->>'direction' AS direction
+   FROM audit_records
+   WHERE asset_class = 'equity'
+   ORDER BY ts DESC
+   LIMIT 20;"
+```
+
+Filter skipped symbols to see *why* a trade was not taken (failed gate + reasons in
+`gates` JSONB):
+
+```bash
+docker compose exec -T postgres psql -U postgres -d sigma -c \
+  "SELECT symbol, decision, gates
+   FROM audit_records
+   WHERE asset_class = 'equity' AND decision = 'skipped'
+   ORDER BY ts DESC LIMIT 10;"
+```
+
+**Weekly strategy report API** (requires API key from `make seed`):
+
+```bash
+curl -s "http://localhost:8001/strategies/performance/report?asset_class=equity&period=7d" \
+  -H "Authorization: Bearer <api-key>" | jq '.summary, .strategies'
+```
+
+Rolling window variants: `period=7d`, `14d`, `24h`. The dashboard at `/strategies`
+defaults to equity + 7d and renders the markdown `summary` field.
+
+**Signal embeddings job** (pgvector, migration 012):
+
+```bash
+make migrate
+cd apps/api && PYTHONPATH=. python scripts/embed_signals.py --asset-class equity
+# or enable nightly: EMBED_SIGNALS_ENABLED=true on the worker
+```
+
+See also [`docs/MODELS.md`](MODELS.md) § Signal embeddings.
+
+---
+
 
 ## B. OANDA practice validation (you run — needs your token)
 

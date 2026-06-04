@@ -29,6 +29,7 @@ from db.connection import get_db
 from db.models import ModelChampion, ModelEvaluation, ModelPromotion
 from middleware.auth import AuthContext, require_auth
 from ml.promotion import approve_promotion, reject_promotion
+from ml.promotion_report import build_promotion_report
 
 router = APIRouter(prefix="/models", tags=["models"])
 AuthDep = Annotated[AuthContext, Depends(require_auth)]
@@ -114,6 +115,19 @@ async def list_evaluations(
         )
         for e in res.scalars().all()
     ]
+
+
+@router.get("/promotions/{promotion_id}/report")
+async def promotion_report(
+    promotion_id: str,
+    auth: AuthDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """Structured JSON report comparing candidate vs incumbent metrics + rationale."""
+    report = await build_promotion_report(db, _as_uuid(promotion_id))
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="promotion not found")
+    return report
 
 
 @router.post("/promotions/{promotion_id}/approve", response_model=PromotionOut)

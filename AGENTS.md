@@ -11,9 +11,9 @@
 ## Learned Workspace Facts
 
 - Repo is `sigma`, a monorepo for an AI/quantum signals + portfolio-optimizer SaaS.
-- Layout: `apps/web/` (Next.js 15 frontend + API gateway), `apps/api/` (FastAPI Python backend), `packages/db/`, `packages/types/`, plus `tests/`, `scripts/`, `docker-compose.yml`, `Makefile`.
-- Frontend stack: TypeScript 5.x, Next.js 15, React 19, Tailwind CSS; auth via Clerk; billing via Stripe.
-- Backend stack: Python 3.12, FastAPI, Pydantic v2; ML/quantum via pandas-ta, PyTorch, scikit-learn, XGBoost, CVXPY, Qiskit, PennyLane. Equity market data via Tiingo → Alpaca → yfinance (fallback); crypto via Coinbase public candles.
+- Layout: `apps/web/` (Next.js 16 frontend + API gateway), `apps/api/` (FastAPI Python backend), `packages/db/`, `packages/types/`, plus `tests/`, `scripts/`, `docker-compose.yml`, `Makefile`.
+- Frontend stack: TypeScript 5.x, Next.js 16, React 19, Tailwind CSS; auth via Clerk; billing via Stripe.
+- Backend stack: Python 3.12, FastAPI, Pydantic v2; ML/quantum via pandas-ta, PyTorch, scikit-learn, XGBoost, CVXPY, Qiskit, PennyLane. Equity market data via Alpaca → Tiingo (fallback); crypto via Coinbase public candles.
 - Execution: Alpaca (equities, alpaca-py) and Coinbase Advanced Trade (crypto), behind a per-asset Executor with OrderIntent → ExecutionReport and DB-backed idempotency.
 - Data layer: PostgreSQL 15 with the TimescaleDB extension; Redis 7 for cache + rate limiting + worker heartbeat/singleton lock.
 - Deployment targets: Vercel (web) and Fly.io (`sigma-api` + `sigma-worker`); Postgres on Timescale Cloud, Redis on Upstash.

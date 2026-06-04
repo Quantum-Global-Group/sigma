@@ -44,33 +44,28 @@ def _make_features() -> pd.DataFrame:
 # ─── fetch_ohlcv ─────────────────────────────────────────────────────────────
 
 class TestFetchOHLCV:
-    """ml.data.fetch_ohlcv now delegates to the multi-source equity adapter.
-
-    These pin the yfinance fallback provider and patch yfinance.download (the
-    real call inside markets.equity_data.fetch_yfinance)."""
+    """ml.data.fetch_ohlcv delegates to the multi-source equity adapter."""
 
     def test_returns_dataframe(self, monkeypatch):
-        monkeypatch.setattr("config.settings.equity_data_providers", "yfinance")
         mock_df = _make_ohlcv()
-        with patch("yfinance.download", return_value=mock_df):
+        with patch("markets.equity.fetch_equity_ohlcv", return_value=mock_df):
             from ml.data import fetch_ohlcv
             result = fetch_ohlcv("AAPL", "daily")
         assert isinstance(result, pd.DataFrame)
         assert not result.empty
 
     def test_raises_when_all_providers_empty(self, monkeypatch):
-        monkeypatch.setattr("config.settings.equity_data_providers", "yfinance")
-        with patch("yfinance.download", return_value=pd.DataFrame()):
+        with patch(
+            "markets.equity.fetch_equity_ohlcv",
+            side_effect=ValueError("No equity data for 'XXXX' from providers ['alpaca', 'tiingo']"),
+        ):
             from ml.data import fetch_ohlcv
             with pytest.raises(ValueError, match="No equity data"):
                 fetch_ohlcv("XXXX", "daily")
 
     def test_column_normalisation(self, monkeypatch):
-        monkeypatch.setattr("config.settings.equity_data_providers", "yfinance")
-        df = _make_ohlcv()
-        # yfinance sometimes returns MultiIndex — test that we flatten it
-        df.columns = pd.MultiIndex.from_tuples([(c, "AAPL") for c in df.columns])
-        with patch("yfinance.download", return_value=df):
+        mock_df = _make_ohlcv()
+        with patch("markets.equity.fetch_equity_ohlcv", return_value=mock_df):
             from ml.data import fetch_ohlcv
             result = fetch_ohlcv("AAPL", "daily")
         assert "close" in result.columns

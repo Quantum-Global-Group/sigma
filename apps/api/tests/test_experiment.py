@@ -19,6 +19,15 @@ _HAS_MLFLOW = importlib.util.find_spec("mlflow") is not None
 # wrapper: no-op safety (always)
 # ---------------------------------------------------------------------------
 
+def test_resolve_experiment_name():
+    from ml.experiment import resolve_experiment_name
+    assert resolve_experiment_name("equity", "ensemble") == "sigma-equity-ensemble"
+    assert resolve_experiment_name("equity", "lstm") == "sigma-equity-lstm"
+    assert resolve_experiment_name("crypto", "ranking") == "sigma-crypto-ranking"
+    assert resolve_experiment_name("forex", "ensemble") == "sigma-forex-ensemble"
+    assert resolve_experiment_name("equity", "custom") == "sigma-equity-custom"
+
+
 def test_run_noop_methods_never_raise():
     from ml.experiment import _Run
     run = _Run(None)

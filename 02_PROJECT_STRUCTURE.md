@@ -62,6 +62,8 @@ apps/web/
 │       │   └── page.tsx            # Portfolio optimizer UI (W3)
 │       ├── api-keys/
 │       │   └── page.tsx            # Create/revoke API keys, view usage (W2)
+│       ├── strategies/
+│       │   └── page.tsx            # Strategy performance dashboard (equity + 7d) (2026-06)
 │       └── billing/
 │           └── page.tsx            # Stripe billing portal embed (W2)
 │
@@ -116,7 +118,7 @@ apps/web/
 │   ├── useUsage.ts                 # SWR hook — API usage this billing period (W2)
 │   └── usePortfolio.ts             # SWR hook — portfolio state (W3)
 │
-├── middleware.ts                   # Clerk auth middleware — protect dashboard routes (W1)
+├── proxy.ts                        # Clerk auth proxy — protect dashboard routes (Next.js 16)
 ├── next.config.ts                  # Next.js config — env, rewrites (W1)
 ├── tailwind.config.ts              # Tailwind config + shadcn/ui preset (W1)
 ├── tsconfig.json                   # TypeScript config (W1)
@@ -153,7 +155,7 @@ apps/api/
 ├── ml/
 │   ├── __init__.py
 │   ├── pipeline.py                 # Main signal pipeline — orchestrates steps (W1)
-│   ├── data.py                     # yfinance fetch + pandas-ta feature engineering (W1)
+│   ├── data.py                     # Equity OHLCV via unified adapter (Alpaca → Tiingo) + feature prep (W1)
 │   ├── features.py                 # Feature vector construction (W2)
 │   ├── inference.py                # Load model + run prediction (W1)
 │   ├── sentiment.py                # FinBERT sentiment → feature (W3)
@@ -274,7 +276,7 @@ apps/api/
   routers/signals.py                # POST /signals — MVP endpoint
   models/signal.py                  # Request/response types
   ml/pipeline.py                    # Signal pipeline skeleton
-  ml/data.py                        # yfinance + pandas-ta
+  ml/data.py                        # Alpaca/Tiingo equity bars + feature prep
   ml/inference.py                   # Model load + predict
   db/connection.py                  # DB engine
   db/models.py                      # ORM models
@@ -293,7 +295,7 @@ packages/db/
 apps/web/
   app/layout.tsx                    # Root + Clerk provider
   app/page.tsx                      # Landing page
-  middleware.ts                     # Auth middleware
+  proxy.ts                          # Auth proxy (replaces middleware.ts in Next 16)
   lib/utils.ts
   lib/clerk.ts
   components/marketing/Hero.tsx

@@ -7,6 +7,8 @@ PG_DB          := sigma
 help:
 	@echo "SIGMA — available targets:"
 	@echo "  make dev      Start Docker services (run API + web manually in separate terminals)"
+	@echo "  make dev-api  Start FastAPI on 0.0.0.0:\$$API_PORT (default 8001)"
+	@echo "  make dev-web  Start Next.js on 0.0.0.0:\$$WEB_PORT (default 3001)"
 	@echo "  make migrate  Apply database migrations in order"
 	@echo "  make seed     Seed dev database with test data"
 	@echo "  make test     Run all tests (Python + TypeScript type-check)"
@@ -25,8 +27,16 @@ dev:
 	docker compose up -d
 	@echo ""
 	@echo "Docker services running. Start servers in separate terminals:"
-	@echo "  Terminal 1:  cd apps/api && uvicorn main:app --reload --port 8000"
-	@echo "  Terminal 2:  cd apps/web && npm run dev"
+	@echo "  Terminal 1:  make dev-api"
+	@echo "  Terminal 2:  make dev-web"
+	@echo ""
+	@echo "Split-server: set NEXT_PUBLIC_API_URL on the web host and CORS_ORIGINS on the API host."
+
+dev-api:
+	cd apps/api && .venv/bin/uvicorn main:app --reload --host $${API_HOST:-0.0.0.0} --port $${API_PORT:-8001}
+
+dev-web:
+	cd apps/web && npm run dev -- -H 0.0.0.0 -p $${WEB_PORT:-3001}
 
 migrate:
 	@echo "Running migrations..."
@@ -71,7 +81,7 @@ worker:
 	docker compose logs -f worker
 
 worker-local:
-	cd apps/api && PYTHONPATH=. python -m worker.main
+	cd apps/api && PYTHONPATH=.:.. .venv/bin/python -c "from dotenv import load_dotenv; load_dotenv('.env'); import runpy; runpy.run_module('worker.main', run_name='__main__')"
 
 train-ranking:
 	cd apps/api && PYTHONPATH=. python scripts/train_ranking.py $(ARGS)

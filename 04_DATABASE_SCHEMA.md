@@ -175,3 +175,11 @@ CREATE INDEX idx_portfolio_snapshots_user ON portfolio_snapshots(user_id, create
 | Signal cache table | Avoids re-running ML pipeline for same ticker within 1 hour |
 | Stripe event log | Idempotency — Stripe can send webhooks multiple times |
 | JSONB for holdings/features | Schema-flexible — holdings format evolves without migrations |
+
+---
+
+## Migrations 005–012 (supplement)
+
+Migrations **001–004** are documented inline above. For **005–012** (trading loop, audit, model evolution, pgvector, PnL), see **[`docs/DATABASE_SCHEMA.md`](./docs/DATABASE_SCHEMA.md)** — table summaries and design notes without duplicating full SQL here.
+
+Apply all migrations in filename order under `packages/db/migrations/`. Never edit applied migration files; add `013_*.sql` for schema changes.

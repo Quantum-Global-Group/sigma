@@ -4,7 +4,7 @@
 
 **ML-powered trading signal API with quantum-hybrid portfolio optimization, multi-asset coverage (equity, crypto, forex, options), and a live paper-trading worker.**
 
-SIGMA is an API-first platform that generates institutional-grade trading signals using ensemble ML models and quantum-inspired portfolio optimization — served as a REST API with usage-based billing, a real-time dashboard, and a digital product storefront. A separate worker service runs the merged razorBill strategy stack against the house book in paper mode across venue adapters (Alpaca equities, Coinbase crypto, OANDA forex, Moomoo options via local OpenD).
+> SIGMA is an API-first platform that generates institutional-grade trading signals using ensemble ML models and quantum-inspired portfolio optimization — served as a REST API with usage-based billing, a real-time dashboard, and a digital product storefront. A separate worker service runs the merged razorBill strategy stack against the house book in paper mode across venue adapters (Alpaca equities, Coinbase crypto, OANDA forex, Moomoo options via local OpenD).
 
 Built for engineers. No sales calls. No minimums. Pay per call.
 
@@ -14,7 +14,7 @@ Built for engineers. No sales calls. No minimums. Pay per call.
 
 **Milestone:** M1 — internal alpha (paper). Core build plus audit/reporting slice
 (2026-06) are shipped; what remains is **operational** — Fly deploy, migrations
-001–012 on prod, 2+ weeks paper observation, weekly strategy review, then M2 decision.
+001–013 on prod, 2+ weeks paper observation, weekly strategy review, then M2 decision.
 
 **Alpha focus:** equity-first on Alpaca paper, with the trained `ensemble_v1.0.pkl`
 wired into the worker (not the heuristic fallback). Crypto ranking model follows
@@ -23,7 +23,7 @@ once the equity loop is observed.
 | Area | State |
 |---|---|
 | **Core API** | Signals, portfolio optimizer, backtesting, API keys, Stripe metering |
-| **Worker loop** | Per-tick fetch → combiner → risk → executor → persisted orders/positions + `audit_records` |
+| **Worker loop** | Per-tick fetch → combiner → risk → executor → persisted orders/positions + `audit_records`; startup book reconciliation |
 | **Equity** | Alpaca paper executor; Alpaca → Tiingo data; trained ensemble shipped in worker image |
 | **Crypto** | Coinbase candles + Advanced Trade adapter; RankingModel trainable via `make train-ranking` |
 | **Forex** | OANDA practice executor (cloud REST — runs on Fly alongside other classes) |
@@ -31,7 +31,7 @@ once the equity loop is observed.
 | **Audit & reports** | `audit_records` for all asset classes; strategy performance API + `/strategies` dashboard |
 | **ML ops** | Per-family MLflow experiments; promotion reports; pgvector embeddings (migration 012) |
 | **Deploy** | Fly.io configs for `sigma-api` + `sigma-worker`; per-class runbooks in `docs/DEPLOY_*.md` |
-| **Validation** | Offline E2E smoke (`make e2e`, migrations `001–012`); OANDA practice in `docs/E2E_VALIDATION.md` |
+| **Validation** | Offline E2E smoke (`make e2e`, migrations `001–013`); OANDA practice in `docs/E2E_VALIDATION.md` |
 | **Go-live** | Human-owned paper→real procedure with three independent locks — `docs/GO_LIVE.md` |
 | **CI** | GitHub Actions — pytest + npm type-check on push/PR |
 
@@ -39,6 +39,36 @@ once the equity loop is observed.
 weekly `/strategies` review, enable pgvector embed job when DGX ready, then M2 beta.
 
 Single source of truth for milestones and sprints: [`docs/ROADMAP.md`](./docs/ROADMAP.md).
+
+---
+
+## Reading Order
+
+1. [Current status](#current-status)
+2. [What It Does](#what-it-does)
+3. [Architecture](#architecture)
+4. [Stack](#stack)
+5. [Getting Started](#getting-started)
+6. [API](#api)
+7. [Project Structure](#project-structure)
+8. [Development Commands](#development-commands)
+9. [Documentation](#documentation)
+10. [Deployment](#deployment)
+11. [Environment Variables](#environment-variables)
+12. [Pricing](#pricing)
+13. [Roadmap](#roadmap)
+
+---
+
+## Audience
+
+| Audience | Start Here |
+| --- | --- |
+| New contributor | [Getting Started](#getting-started), [Project Structure](#project-structure) |
+| API consumer | [API](#api), [`05_API_REFERENCE.md`](./05_API_REFERENCE.md) |
+| ML engineer | [`docs/MODELS.md`](./docs/MODELS.md), [Stack](#stack) |
+| Operator / deployer | [Deployment](#deployment), [`DEPLOY.md`](./DEPLOY.md), [`docs/RUNBOOK_WORKER.md`](./docs/RUNBOOK_WORKER.md) |
+| Planner | [Roadmap](#roadmap), [`docs/ROADMAP.md`](./docs/ROADMAP.md) |
 
 ---
 
@@ -59,38 +89,36 @@ Single source of truth for milestones and sprints: [`docs/ROADMAP.md`](./docs/RO
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────┐
-│  Next.js 16  (Vercel)                        │
-│  Landing · Dashboard · Docs · Positions      │
-│  Orders · Execution · API Keys · Billing     │
-└──────────────┬───────────────────────────────┘
-               │ REST
-┌──────────────▼───────────────────────────────┐
-│  Vercel Functions  (TypeScript)              │
-│  Auth · Rate limiting · Stripe metering      │
-└──────────────┬───────────────────────────────┘
-               │
-       ┌───────┴──────────────────┐
-       │                          │
-┌──────▼──────┐         ┌─────────▼─────────┐
-│  FastAPI    │ ◄─────► │   apps/worker     │
-│  (Fly.io)   │  X-     │   (Fly.io)        │
-│  ML · Quantum│ Internal│   Live tick loop  │
-│  Signals    │ -Secret │   multi-asset     │
-└──────┬──────┘         └─────────┬─────────┘
-       │                          │
-       └────────┬─────────────────┘
-                │
-       ┌────────▼──────────────────┐
-       │  PostgreSQL + TimescaleDB │
-       │  Redis                    │
-       │  (Timescale Cloud /       │
-       │   Upstash)                │
-       └───────────────────────────┘
-```
-
 Three services. The API gateway (TypeScript, Vercel) handles auth and billing. The ML backend (Python, Fly.io) handles signal generation, portfolio optimization, and quantum circuits. The worker (Python, Fly.io) runs the per-tick trading cycle and reads/writes positions, orders, and exit state through the same Postgres. Options run on a separate local/VPS worker next to Moomoo OpenD, sharing the same database. Each service can be deployed and scaled independently.
+
+```mermaid
+flowchart TB
+  subgraph edge [Vercel]
+    WEB["Next.js 16 — Landing · Dashboard · Docs · Positions · Orders · Strategies · Billing"]
+    GW["Vercel Functions (TypeScript) — Auth · Rate limiting · Stripe metering"]
+  end
+  subgraph fly [Fly.io]
+    API["FastAPI — ML · Quantum · Signals"]
+    WORKER["apps/worker — live tick loop (equity · crypto · forex)"]
+  end
+  subgraph lab [Local / VPS]
+    OPT["options worker — Moomoo OpenD"]
+  end
+  subgraph data [Data — Timescale Cloud / Upstash]
+    PG[("PostgreSQL + TimescaleDB")]
+    REDIS[("Redis")]
+  end
+  WEB --> GW
+  GW -->|REST| API
+  GW -->|"X-Internal-Secret"| API
+  API <-->|"X-Internal-Secret"| WORKER
+  API --> PG
+  API --> REDIS
+  WORKER --> PG
+  WORKER --> REDIS
+  OPT --> PG
+  OPT --> REDIS
+```
 
 ---
 
@@ -126,6 +154,18 @@ Three services. The API gateway (TypeScript, Vercel) handles auth and billing. T
 node --version    # >= 20.x
 python --version  # >= 3.12 (pandas-ta requires it; Dockerfile + CI use 3.12)
 docker --version  # >= 24.x
+```
+
+### Setup flow
+
+```mermaid
+flowchart LR
+  A[Clone + configure .env] --> B[docker compose up -d]
+  B --> C[make migrate]
+  C --> D[make seed]
+  D --> E[Start FastAPI :8000]
+  E --> F[Start Next.js :3000]
+  F --> G[First API call]
 ```
 
 ### 1. Clone and configure
@@ -207,6 +247,25 @@ Base URL: `https://api.sigma.dev` | Local: `http://localhost:8000`
 
 All endpoints require `Authorization: Bearer YOUR_API_KEY` unless noted.
 
+### Request lifecycle
+
+```mermaid
+sequenceDiagram
+  participant Client
+  participant Gateway as Vercel Gateway
+  participant API as FastAPI
+  participant Redis
+  participant Meter as Stripe
+  Client->>Gateway: POST /signals (Bearer key)
+  Gateway->>Redis: validate key + rate limit
+  Gateway->>API: forward request
+  API->>Redis: signal cache lookup
+  API->>API: ML pipeline (on miss)
+  API-->>Gateway: signal payload
+  Gateway->>Meter: record usage (customer keys only)
+  Gateway-->>Client: 200 signal
+```
+
 ### Core endpoints
 
 | Method | Endpoint | Description |
@@ -249,7 +308,7 @@ sigma/
 │   ├── api/          # FastAPI — signals, ML, quantum, portfolio, markets, execution adapters, risk
 │   └── worker/       # Long-running asyncio service — per-tick trading cycle (paper + venue adapters)
 ├── packages/
-│   ├── db/           # SQL migrations 001–012 + schema
+│   ├── db/           # SQL migrations 001–013 + schema
 │   └── types/        # Shared TypeScript types — barrel `@sigma/types`
 ├── .github/workflows/  # CI (pytest + npm type-check on push/PR)
 ├── docs/
@@ -315,6 +374,7 @@ make e2e-down       # Stop E2E containers (data persists until make clean)
 | [`docs/DEPLOY_EQUITY.md`](./docs/DEPLOY_EQUITY.md) | Equity (Alpaca paper) Fly deploy runbook |
 | [`docs/DEPLOY_FOREX.md`](./docs/DEPLOY_FOREX.md) | Forex (OANDA practice) Fly overlay |
 | [`docs/DEPLOY_OPTIONS.md`](./docs/DEPLOY_OPTIONS.md) | Options (Moomoo/OpenD) local/VPS overlay |
+| [`docs/M1_BRINGUP.md`](./docs/M1_BRINGUP.md) | M1 bring-up checklist — wire infra + brokers, flip off paper, observe |
 
 ---
 
@@ -439,29 +499,51 @@ Usage-based option: $0.01 per signal call — no subscription required.
 
 ## Roadmap
 
-Shipped (see [`docs/ROADMAP.md`](./docs/ROADMAP.md) for detail):
+The **code build for the internal alpha is effectively complete** — what remains for M1 is operational (run the Fly deploy, then observe). [`docs/ROADMAP.md`](./docs/ROADMAP.md) is the single source of truth for milestones, sprints, and backlog.
 
-- [x] Core signal generation API
-- [x] Usage-based Stripe billing
-- [x] API key management dashboard
-- [x] Portfolio rebalancer (CVXPY + QAOA)
-- [x] Strategy backtesting engine
+```mermaid
+flowchart LR
+  BUILT["✅ Built — alpha code complete"] --> M1["🚧 M1 — Internal alpha (deploy + observe)"]
+  M1 --> M2["⬜ M2 — Beta (multi-tenant paper)"]
+  M2 --> M3["⬜ M3 — Production (sandbox → live)"]
+```
+
+### ✅ Built (shipped on `main`)
+
+- [x] Core signal generation API — equity, crypto, forex behind one `MarketAdapter`
+- [x] Usage-based Stripe billing + API key management dashboard
+- [x] Portfolio rebalancer (CVXPY + QAOA) + strategy backtesting engine
 - [x] **razorBill + tradeFlux merge** — crypto signals, multi-strategy combiner, Alpaca equity execution, advanced exits, dynamic universe
-- [x] **Live worker loop** — paper executor, venue adapters (Coinbase, Alpaca, OANDA, Moomoo), ExitState persistence, rebuy cooldown
+- [x] **Live worker loop** — paper executor, venue adapters (Coinbase, Alpaca, OANDA, Moomoo), ExitState persistence, rebuy cooldown, startup book reconciliation
 - [x] **Trained equity ensemble** wired into worker (`ensemble_v1.0.pkl` baked into image)
+- [x] **Self-evolution loop** — decision logging + outcome labeling (009), evaluate → human-gated promotion → champion (010), worker scheduler
+- [x] **Alpha research foundation** — purged CV (`ml/cv.py`), triple-barrier labels, crypto meta-labeling, cost-aware net-edge gate
 - [x] **Observability + ops** — worker Sentry, `/health/worker`, executor retry/backoff, Redis singleton lock, CI workflow
 - [x] **Audit & strategy reporting** — `audit_records` parity; performance API; `/strategies` dashboard
 - [x] **ML ops slice** — MLflow per-family experiments, promotion reports, pgvector embeddings (012), universe comparison CLI
 - [x] **Deploy + validation docs** — Fly configs, per-class runbooks, E2E smoke (`make e2e`), go-live procedure
 - [x] **Next.js 16** web upgrade
 
-In progress / next:
+### 🚧 M1 — Internal alpha (current, operational)
 
-- [ ] **M1 — Internal alpha** (current) — Fly deploy + migrations 001–012 + 2+ weeks paper + weekly strategy review
-- [ ] **M2 — Beta** — multi-tenant signals + customer-facing web pages + Stripe metering audit
-- [ ] **M3 — Production** — sandbox → live, per-day notional cap, DR runbook
+- [ ] `fly deploy` `sigma-api` + `sigma-worker`; provision prod Postgres (Timescale Cloud) + Redis (Upstash); migrations 001–013
+- [ ] Worker runs **2+ weeks unattended** on Fly; one healthy tick per cadence; orders/positions rows grow
+- [ ] Trained crypto **RankingModel** artifact shipped (follows once the equity loop is observed)
+- [ ] Daily signal log + weekly `/strategies` review; Sentry ≤1 unique exception/week
+- [ ] M1 → M2 go/no-go decision (`docs/decisions/`)
 
-See [`docs/ROADMAP.md`](./docs/ROADMAP.md) for milestones + sprints + backlog (single source of truth).
+### ⬜ M2 — Beta (paper, multi-tenant)
+
+- [ ] Expose `/signals?asset_class=crypto` to Pro+; Stripe metering correctness audit (crypto vs equity, no internal traffic billed)
+- [ ] Customer-facing web pages — remove plaintext API-key inputs, integrate Clerk session
+- [ ] API reference for `/positions`, `/orders`, `/execution`; rate-limit fairness across asset classes; beta-invite flow
+
+### ⬜ M3 — Production (sandbox → live)
+
+- [ ] Staged go-live per [`docs/GO_LIVE.md`](./docs/GO_LIVE.md) — sandbox roundtrip, then live keys with **per-day notional cap**
+- [ ] Risk circuit breaker (single switch to halt all worker buys); DR runbook (stop worker, reconcile positions, restart)
+
+See [`docs/ROADMAP.md`](./docs/ROADMAP.md) for the full sprint plan and backlog.
 
 ---
 

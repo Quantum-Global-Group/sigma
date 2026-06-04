@@ -4,6 +4,31 @@
 
 ---
 
+## Path Overview
+
+```mermaid
+flowchart LR
+  P[Prerequisites] --> C[Clone + .env]
+  C --> S[docker compose up -d]
+  S --> M[make migrate]
+  M --> API[FastAPI :8000 + seed]
+  API --> WEB[Next.js :3000]
+  WEB --> T[pytest + type-check]
+  T --> CALL[First API call]
+```
+
+| Step | Command | Outcome |
+| --- | --- | --- |
+| 1 | `git clone … && cp .env.example …` | Repo + env files |
+| 2 | `docker compose up -d` | Postgres + TimescaleDB + Redis |
+| 3 | `make migrate` | Schema applied |
+| 4 | `uvicorn main:app --reload` | Backend on `:8000` |
+| 5 | `npm run dev` | Frontend on `:3000` |
+| 6 | `pytest` / `npm run type-check` | Green tests |
+| 7 | `curl … /signals` | First signal |
+
+---
+
 ## Prerequisites
 
 ```bash

@@ -21,9 +21,12 @@ from .base import MarketAdapter  # noqa: F401  (kept for type/context locality)
 logger = logging.getLogger(__name__)
 
 # Lookback window per timeframe (how far back to request).
+# Equity daily extended to 2 years: ~500 trading days × 10 symbols = 5000
+# training samples vs the previous 180-day (~124 bar) window that produced
+# only 1040 samples and depressed model confidence.
 _LOOKBACK: dict[str, timedelta] = {
-    "daily": timedelta(days=180),
-    "1d": timedelta(days=180),
+    "daily": timedelta(days=730),
+    "1d": timedelta(days=730),
     "hourly": timedelta(days=14),
     "1h": timedelta(days=14),
     "4h": timedelta(days=60),

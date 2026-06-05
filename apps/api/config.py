@@ -205,6 +205,12 @@ class Settings(BaseSettings):
     # realized return, and the |return| below which an outcome is "flat".
     label_horizon_bars: int = 5
     label_flat_threshold: float = 0.001    # 10 bps
+    # Per-asset label threshold for train_models.py (used when no --threshold flag).
+    # Equity daily bars move 0.5-2% — 0.5% threshold gives ~35% BUY/SELL balance.
+    # Forex 4h bars move 0.07-0.17% median — 0.1% threshold gives ~40% BUY/SELL balance.
+    label_threshold_equity: float = 0.005
+    label_threshold_forex: float = 0.001
+    label_threshold_crypto: float = 0.005
 
     # Self-evolving model loop. Promotion is human-gated: the loop proposes a
     # champion change when a candidate beats the incumbent by min_improvement on
@@ -280,10 +286,11 @@ class Settings(BaseSettings):
     # Minimum number of strategies that must vote in the same direction as the
     # combined signal before it is treated as actionable. 0 = disabled.
     min_strategy_agreement: int = 4             # equity: 4 of 9 must agree
-    # Forex agreement filter disabled (=0): ML strategy returns 0 until forex
-    # model is trained; max achievable votes is 2/6, so 3 is unreachable.
-    # Re-enable after training a forex ML model and validating SELL signal generation.
-    min_strategy_agreement_forex: int = 0       # forex: disabled until ML model trained
+    # Forex agreement filter: 2/6 strategies must vote same direction.
+    # Using 2 (not 3) because momentum signals are weak (0.01-0.02) and only ML + one
+    # technical strategy typically agree on strong moves. Requires vote_threshold=0.01
+    # (vs equity 0.05) to count these weaker signals.
+    min_strategy_agreement_forex: int = 2       # forex: 2 of 6 must agree
     # Per-asset vote threshold: minimum |strength| for a strategy to count as a vote.
     # Forex signals are weaker (0.01–0.05 range vs equity 0.05–0.2), so use a
     # lower threshold when the forex filter is re-enabled.

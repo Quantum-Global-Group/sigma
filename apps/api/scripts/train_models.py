@@ -246,7 +246,9 @@ def main():
     parser.add_argument("--symbols", nargs="+", default=None,
                         help="Override the per-asset-class default symbol list")
     parser.add_argument("--timeframe", default=None, help="Override the per-asset-class default timeframe")
-    parser.add_argument("--threshold", type=float, default=0.005, help="Label threshold for BUY/SELL")
+    parser.add_argument("--threshold", type=float, default=None,
+                        help="Label threshold for BUY/SELL (default: per-asset from settings: "
+                             "equity=0.005, forex=0.001, crypto=0.005)")
     args = parser.parse_args()
 
     if not (args.ensemble or args.lstm or args.quantum_hybrid or args.all):
@@ -256,12 +258,21 @@ def main():
     symbols = args.symbols or default_symbols
     timeframe = args.timeframe or default_tf
 
-    logger.info("Training asset_class=%s version=%s symbols=%s timeframe=%s",
-                args.asset_class, args.version, symbols, timeframe)
-    X, y = build_training_set(symbols, args.asset_class, timeframe, threshold=args.threshold)
+    # Per-asset-class label threshold: equity/crypto use 0.5% (daily moves), forex uses
+    # 0.1% (4h bars typically move 0.07-0.17% median — 0.5% would label 98%+ as HOLD).
+    _thresh_defaults = {
+        "equity": settings.label_threshold_equity,
+        "forex": settings.label_threshold_forex,
+        "crypto": settings.label_threshold_crypto,
+    }
+    threshold = args.threshold if args.threshold is not None else _thresh_defaults.get(args.asset_class, 0.005)
+
+    logger.info("Training asset_class=%s version=%s symbols=%s timeframe=%s threshold=%.4f",
+                args.asset_class, args.version, symbols, timeframe, threshold)
+    X, y = build_training_set(symbols, args.asset_class, timeframe, threshold=threshold)
 
     kw = dict(asset_class=args.asset_class, version=args.version, symbols=symbols,
-              timeframe=timeframe, threshold=args.threshold)
+              timeframe=timeframe, threshold=threshold)
     if args.all or args.ensemble:
         train_ensemble(X, y, **kw)
     if args.all or args.lstm:

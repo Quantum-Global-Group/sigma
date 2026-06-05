@@ -295,9 +295,21 @@ async def _process_symbol(
         )
 
     # 2. Combiner -> SignalResult, persist signal_history row.
+    min_agreement = (
+        settings.min_strategy_agreement_forex
+        if asset_class == "forex"
+        else settings.min_strategy_agreement
+    )
+    vote_threshold = (
+        settings.strategy_agreement_vote_threshold_forex
+        if asset_class == "forex"
+        else settings.strategy_agreement_vote_threshold
+    )
     combined = combiner.combine_signals(
         symbol, feats, px_now,
         model_predictions=_model_pred(model, symbol, df),
+        min_agreement=min_agreement,
+        vote_threshold=vote_threshold,
     )
     result = combine_to_result(combined, model_version=model_version)
     rec.features.update(_snapshot_audit_features(feats))

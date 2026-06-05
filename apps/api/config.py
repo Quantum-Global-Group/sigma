@@ -277,6 +277,18 @@ class Settings(BaseSettings):
     forex_strategy_weights: str = ""
     min_signal_confidence: float = 0.3
     min_signal_confidence_forex: float = 0.15   # forex combiner scores lower; separate floor
+    # Minimum number of strategies that must vote in the same direction as the
+    # combined signal before it is treated as actionable. 0 = disabled.
+    min_strategy_agreement: int = 4             # equity: 4 of 9 must agree
+    # Forex agreement filter disabled (=0): ML strategy returns 0 until forex
+    # model is trained; max achievable votes is 2/6, so 3 is unreachable.
+    # Re-enable after training a forex ML model and validating SELL signal generation.
+    min_strategy_agreement_forex: int = 0       # forex: disabled until ML model trained
+    # Per-asset vote threshold: minimum |strength| for a strategy to count as a vote.
+    # Forex signals are weaker (0.01–0.05 range vs equity 0.05–0.2), so use a
+    # lower threshold when the forex filter is re-enabled.
+    strategy_agreement_vote_threshold: float = 0.05        # equity
+    strategy_agreement_vote_threshold_forex: float = 0.01  # forex (weaker signals)
     strategy: StrategyParams = StrategyParams()
 
     # Risk / sizing (razorBill — referenced by apps/api/risk/)

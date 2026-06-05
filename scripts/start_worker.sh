@@ -139,7 +139,9 @@ echo "  WORKER_ASSET_CLASSES=$ASSET_CLASSES"
 echo ""
 
 export WORKER_ASSET_CLASSES="$ASSET_CLASSES"
-export PYTHONPATH="$API_DIR:${PYTHONPATH:-}"
+# apps/api  — config, db, execution, markets, ml, risk, universe
+# apps      — makes `import worker.tick` resolve to apps/worker/tick.py
+export PYTHONPATH="$API_DIR:$REPO_ROOT/apps:${PYTHONPATH:-}"
 
 # Run from API dir so pydantic-settings resolves .env automatically
 cd "$API_DIR"

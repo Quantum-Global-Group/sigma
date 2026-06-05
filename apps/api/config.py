@@ -264,10 +264,13 @@ class Settings(BaseSettings):
     # Per-asset-class strategy selection. SDE strategies (gbm/ou/heston) assume
     # daily bars (dt=1/252) so they are equity-only; crypto runs 5m bars.
     crypto_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier"
-    equity_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier,gbm,ou,heston,ict"
+    # heston removed: saturated at +1.0 every bar (zero information content)
+    # breakout removed: stuck at 0.0 on daily bars for current liquid universe
+    equity_strategies: str = "momentum,mean_reversion,regime,ml,macd,fourier,gbm,ou,ict"
     # Forex trades H4 bars, so the SDE strategies (gbm/ou/heston) — which assume
     # daily bars (dt=1/252) — are excluded.
-    forex_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier"
+    # breakout removed: stuck at 0.0 on 4h forex bars
+    forex_strategies: str = "momentum,mean_reversion,regime,ml,macd,fourier"
     # Empty → combiner falls back to equal weights across the selected list.
     crypto_strategy_weights: str = ""
     equity_strategy_weights: str = ""

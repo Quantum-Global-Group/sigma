@@ -66,10 +66,27 @@ def orders(req: OrderRequest, _: None = Depends(require_secret)):
         # Live is allowed only when the bridge process itself was deliberately
         # started in live mode; the DGX executor has a separate allow-live flag.
         pass
-    return mt5_client.market_order(
-        symbol=req.symbol,
-        side=req.side,
-        volume=req.volume,
-        client_order_id=req.client_order_id,
-        deviation=req.deviation,
-    )
+
+    # Pre-flight: catch AutoTrading disabled before order_send wastes a round-trip.
+    import MetaTrader5 as _mt5  # noqa: PLC0415
+    terminal = _mt5.terminal_info()
+    if terminal is not None and not terminal.trade_allowed:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "MT5 terminal AutoTrading is disabled. "
+                "Click the AutoTrading toolbar button (or Tools → Options → "
+                "Expert Advisors → Allow automated trading) in the BlackBull terminal."
+            ),
+        )
+
+    try:
+        return mt5_client.market_order(
+            symbol=req.symbol,
+            side=req.side,
+            volume=req.volume,
+            client_order_id=req.client_order_id,
+            deviation=req.deviation,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -30,14 +30,46 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("evaluate_models")
 
 
+async def _discover_version(session, asset_class: str, requested: str) -> str:
+    """Return the best matching model_version from signal_history.
+
+    EnsembleSignalModel stores 'ensemble_v1.0' but settings.model_version is
+    'v1.0'. If the requested string has no labeled rows, look for any version
+    in signal_history that contains the requested string as a substring, or
+    just return the most common labeled version for this asset class."""
+    from sqlalchemy import text
+    r = await session.execute(text("""
+        SELECT model_version, COUNT(*) as n
+        FROM signal_history
+        WHERE asset_class = :ac AND labeled_at IS NOT NULL
+        GROUP BY model_version ORDER BY n DESC
+    """), {"ac": asset_class})
+    rows = r.fetchall()
+    if not rows:
+        return requested
+    versions = [row[0] for row in rows]
+    # Exact match first
+    if requested in versions:
+        return requested
+    # Substring match (e.g. 'v1.0' inside 'ensemble_v1.0')
+    for v in versions:
+        if requested in v or v in requested:
+            logger.info("Version %r not found; using %r (found in signal_history)", requested, v)
+            return v
+    # Fall back to the most common version
+    logger.info("Version %r not found; falling back to %r (most labeled)", requested, versions[0])
+    return versions[0]
+
+
 async def _run(asset_class: str, version: str, model_type: str, propose: bool) -> None:
     async with AsyncSessionLocal() as session:
-        ev = await evaluate_model(session, asset_class, version, model_type=model_type)
+        resolved = await _discover_version(session, asset_class, version)
+        ev = await evaluate_model(session, asset_class, resolved, model_type=model_type)
         logger.info("Evaluated %s %s: n=%d directional_accuracy=%s",
-                    asset_class, version, ev.n_samples, ev.directional_accuracy)
+                    asset_class, resolved, ev.n_samples, ev.directional_accuracy)
         if propose:
             await session.flush()
-            promo = await propose_promotion(session, asset_class, version, model_type=model_type)
+            promo = await propose_promotion(session, asset_class, resolved, model_type=model_type)
             logger.info("Proposed promotion: %s", "yes (pending)" if promo else "no (gate not met)")
         await session.commit()
 

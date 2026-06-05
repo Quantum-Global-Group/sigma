@@ -39,10 +39,18 @@ def initialize() -> None:
     kwargs = {}
     if settings.mt5_path:
         kwargs["path"] = settings.mt5_path
+    # Pass credentials into initialize() so the terminal launches AND authenticates
+    # atomically. Calling initialize(path) alone makes a freshly-launched terminal
+    # auto-authorize with no/stale account, which fails with -6 (Authorization failed).
+    have_creds = bool(settings.mt5_login and settings.mt5_password and settings.mt5_server)
+    if have_creds:
+        kwargs["login"] = settings.mt5_login
+        kwargs["password"] = settings.mt5_password
+        kwargs["server"] = settings.mt5_server
     if not mt5.initialize(**kwargs):
         code, msg = mt5.last_error()
         raise RuntimeError(f"mt5.initialize failed: {code} {msg}")
-    if settings.mt5_login and settings.mt5_password and settings.mt5_server:
+    if have_creds:
         if not mt5.login(settings.mt5_login, password=settings.mt5_password, server=settings.mt5_server):
             code, msg = mt5.last_error()
             raise RuntimeError(f"mt5.login failed: {code} {msg}")

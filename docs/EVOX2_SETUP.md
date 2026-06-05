@@ -24,11 +24,12 @@ cd C:\path\to\sigma\services\mt5-bridge
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 
-# Create .env
+# Create .env from the example (then fill in your BlackBull credentials)
+copy .env.example .env
 notepad .env
 ```
 
-Paste this into `.env` and **fill in your BlackBull demo credentials**:
+Fill in your BlackBull demo credentials (all other values are pre-set):
 
 ```ini
 MT5_BRIDGE_HOST=0.0.0.0
@@ -87,4 +88,15 @@ curl.exe http://127.0.0.1:11111 > $null
 
 ---
 
-When both services are running, let me know on the DGX and I'll run the full verification from here.
+## 5. Activate from DGX
+
+Once both services pass their local curl tests above, run this from the DGX:
+
+```bash
+cd /home/roc/quantumGlobalGroup/sigma/apps/api
+PYTHONPATH=. .venv/bin/python scripts/activate_evox2.py
+```
+
+The script verifies MT5 bridge + OpenD health, then automatically updates `.env`
+to flip `FOREX_EXECUTOR=mt5` and `OPTION_EXECUTOR=moomoo` and expands
+`FOREX_MT5_SYMBOLS` to the full forex universe.

@@ -26,7 +26,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 from config import settings
@@ -184,26 +184,33 @@ def build_scheduler(asset_classes: list[str]):
 
     classes = resolve_asset_classes(asset_classes)
     scheduler = AsyncIOScheduler(timezone="UTC")
+    # First run shortly after startup, then on each job's interval. The previous
+    # next_run_time=None created the jobs PAUSED, so APScheduler never fired them
+    # — labeling/evaluate/train/snapshot produced zero rows while trading ran
+    # fine. A near-future first run also makes the loop restart-resilient: each
+    # worker start kicks a labeling pass instead of waiting a full interval that
+    # a frequent restart would keep resetting back to zero.
+    first_run = datetime.now(timezone.utc) + timedelta(minutes=2)
     scheduler.add_job(
         label_and_evaluate_job, "interval",
         hours=settings.label_interval_hours, args=[classes],
-        id="label_and_evaluate", next_run_time=None,
+        id="label_and_evaluate", next_run_time=first_run,
     )
     scheduler.add_job(
         train_and_propose_job, "interval",
         hours=settings.train_interval_hours, args=[classes],
-        id="train_and_propose", next_run_time=None,
+        id="train_and_propose", next_run_time=first_run,
     )
     scheduler.add_job(
         equity_snapshot_job, "interval",
         hours=settings.equity_snapshot_interval_hours,
-        id="equity_snapshot", next_run_time=None,
+        id="equity_snapshot", next_run_time=first_run,
     )
     if settings.embed_signals_enabled:
         scheduler.add_job(
             embed_signals_job, "interval",
             hours=settings.embed_signals_interval_hours,
-            id="embed_signals", next_run_time=None,
+            id="embed_signals", next_run_time=first_run,
         )
     logger.info("[scheduler] built with jobs for %s (label=%dh, train=%dh, snapshot=%dh, embed=%s)",
                 classes, settings.label_interval_hours, settings.train_interval_hours,

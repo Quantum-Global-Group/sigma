@@ -273,6 +273,7 @@ class Settings(BaseSettings):
     equity_strategy_weights: str = ""
     forex_strategy_weights: str = ""
     min_signal_confidence: float = 0.3
+    min_signal_confidence_forex: float = 0.15   # forex combiner scores lower; separate floor
     strategy: StrategyParams = StrategyParams()
 
     # Risk / sizing (razorBill — referenced by apps/api/risk/)

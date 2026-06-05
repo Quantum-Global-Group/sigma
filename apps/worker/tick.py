@@ -7,7 +7,7 @@ Pipeline (per symbol):
   4. strategy combiner -> Signal
   5. translate to SignalResult, persist signal_history row
   6. rebuy cooldown gate (skip BUY if recent SELL on same symbol)
-  7. confidence + strength gate (settings.min_signal_confidence)
+  7. confidence + strength gate (min_signal_confidence / min_signal_confidence_forex)
   8. position sizing via PositionSizer (Kelly cap)
   9. executor.place(order) -> Fill
  10. persist Order + create/update Position + ExitState via sigma's ORM
@@ -328,13 +328,18 @@ async def _process_symbol(
     ))
 
     # 3. Entry gate: HOLD / low confidence / already long.
-    if result.signal == "HOLD" or result.confidence < settings.min_signal_confidence:
+    conf_floor = (
+        settings.min_signal_confidence_forex
+        if asset_class == "forex"
+        else settings.min_signal_confidence
+    )
+    if result.signal == "HOLD" or result.confidence < conf_floor:
         reasons: list[str] = []
         if result.signal == "HOLD":
             reasons.append("HOLD signal")
-        if result.confidence < settings.min_signal_confidence:
+        if result.confidence < conf_floor:
             reasons.append(
-                f"confidence {result.confidence:.2f} < {settings.min_signal_confidence}",
+                f"confidence {result.confidence:.2f} < {conf_floor}",
             )
         rec.gate("G2_signal", False, reasons)
         rec.finalize("skipped")
@@ -364,31 +369,52 @@ async def _process_symbol(
     rec.gate("G5_kill_switch", True)
 
     # 5. Size + place order.
-    sized = sizer.kelly_optimal(price=px_now, signal=combined.strength)
-    rec.risk.update({
-        "qty": sized.qty,
-        "notional": sized.notional,
-        "kelly_fraction": getattr(sized, "kelly_fraction", None),
-        "equity": sizer.equity,
-    })
-    if sized.qty <= 0 or sized.notional <= 0:
-        rec.gate("G6_sizer", False, ["sizer returned zero qty"]).finalize("skipped")
-        logger.info("[%s] %s sizer returned zero qty", asset_class, symbol)
-        return
-    rec.gate("G6_sizer", True)
-
     side = Side.BUY if result.signal == "BUY" else Side.SELL
-    intent = OrderIntent(
-        asset_class=asset_class,
-        symbol=symbol,
-        side=side,
-        order_type=OrderType.MARKET,
-        qty=sized.qty,
-        limit_px=px_now,  # reference price for paper/slippage + idempotency context
-        time_in_force=TimeInForce.DAY,
-        signal_time=signal_ts,
-        client_order_id=_client_order_id(asset_class, symbol, side.value, signal_ts),
-    )
+
+    if side == Side.SELL:
+        # Long-only: only sell a position we actually hold.
+        if open_position is None or open_position.closed or float(open_position.qty) <= 0:
+            rec.gate("G6_sizer", False, ["SELL signal but no open position to exit"]).finalize("skipped")
+            logger.info("[%s] %s SELL signal — no open position, skipping", asset_class, symbol)
+            return
+        sell_qty = float(open_position.qty)
+        rec.risk.update({"qty": sell_qty, "notional": sell_qty * px_now, "equity": sizer.equity})
+        rec.gate("G6_sizer", True)
+        intent = OrderIntent(
+            asset_class=asset_class,
+            symbol=symbol,
+            side=Side.SELL,
+            order_type=OrderType.MARKET,
+            qty=sell_qty,
+            limit_px=px_now,
+            time_in_force=TimeInForce.DAY,
+            signal_time=signal_ts,
+            client_order_id=_client_order_id(asset_class, symbol, "sell", signal_ts),
+        )
+    else:
+        sized = sizer.kelly_optimal(price=px_now, signal=combined.strength)
+        rec.risk.update({
+            "qty": sized.qty,
+            "notional": sized.notional,
+            "kelly_fraction": getattr(sized, "kelly_fraction", None),
+            "equity": sizer.equity,
+        })
+        if sized.qty <= 0 or sized.notional <= 0:
+            rec.gate("G6_sizer", False, ["sizer returned zero qty"]).finalize("skipped")
+            logger.info("[%s] %s sizer returned zero qty", asset_class, symbol)
+            return
+        rec.gate("G6_sizer", True)
+        intent = OrderIntent(
+            asset_class=asset_class,
+            symbol=symbol,
+            side=Side.BUY,
+            order_type=OrderType.MARKET,
+            qty=sized.qty,
+            limit_px=px_now,
+            time_in_force=TimeInForce.DAY,
+            signal_time=signal_ts,
+            client_order_id=_client_order_id(asset_class, symbol, side.value, signal_ts),
+        )
 
     report, affected, skip_reason = await _submit_and_persist(session, executor, intent, open_position)
     if skip_reason == "idempotent":
@@ -741,6 +767,8 @@ async def _submit_and_persist(
         stop_px=intent.stop_px,
         status=report.order.status.value,
         raw=(report.fills[0].metadata if report.fills else None),
+        meta={"intent_qty": float(intent.qty) if intent.qty else None,
+              "rejected_reason": getattr(report.order, "rejected_reason", None)},
     ))
 
     if filled_qty <= 0:
@@ -828,3 +856,99 @@ def _default_timeframe(asset_class: str) -> str:
     if asset_class == "forex":
         return "4h"
     return "daily"
+
+
+async def reconcile_alpaca_positions() -> int:
+    """Sync Alpaca broker positions into the DB.
+
+    Catches the case where an order filled at Alpaca but our _poll_fill timed
+    out before the fill landed, leaving status=submitted / qty=0 in the DB
+    with no Position row. Returns the number of positions created or updated.
+    """
+    try:
+        from execution.alpaca import AlpacaExecutor
+        executor = AlpacaExecutor()
+    except Exception:
+        logger.warning("[reconcile] AlpacaExecutor unavailable — skipping", exc_info=True)
+        return 0
+
+    loop = asyncio.get_event_loop()
+    try:
+        broker_positions = await loop.run_in_executor(None, executor._client.get_all_positions)
+    except Exception:
+        logger.exception("[reconcile] get_all_positions failed")
+        return 0
+
+    patched = 0
+    now = datetime.now(timezone.utc)
+
+    async with AsyncSessionLocal() as session:
+        for bp in broker_positions:
+            symbol = str(bp.symbol)
+            broker_qty = float(getattr(bp, "qty", 0) or 0)
+            broker_px = float(getattr(bp, "avg_entry_price", 0) or 0)
+            broker_cur = float(getattr(bp, "current_price", broker_px) or broker_px)
+            if broker_qty <= 0:
+                continue
+
+            res = await session.execute(
+                select(Position)
+                .where(Position.asset_class == "equity")
+                .where(Position.symbol == symbol)
+                .where(Position.closed.is_(False))
+            )
+            db_pos = res.scalar_one_or_none()
+
+            if db_pos is None:
+                logger.info("[reconcile] creating missing position %s qty=%.4f px=%.4f",
+                            symbol, broker_qty, broker_px)
+                session.add(Position(
+                    asset_class="equity",
+                    symbol=symbol,
+                    qty=broker_qty,
+                    entry_px=broker_px,
+                    entry_ts=now,
+                    current_px=broker_cur,
+                    unrealized_pnl=(broker_cur - broker_px) * broker_qty,
+                ))
+                patched += 1
+            elif abs(float(db_pos.qty) - broker_qty) > 1e-4:
+                logger.info("[reconcile] correcting %s qty %.4f → %.4f",
+                            symbol, float(db_pos.qty), broker_qty)
+                db_pos.qty = broker_qty
+                db_pos.current_px = broker_cur
+                db_pos.updated_at = now
+                patched += 1
+
+        # Mark submitted equity orders as filled when Alpaca confirms them.
+        res = await session.execute(
+            select(Order)
+            .where(Order.asset_class == "equity")
+            .where(Order.status == "submitted")
+            .where(Order.executor == "alpaca")
+        )
+        stuck_orders = res.scalars().all()
+        for o in stuck_orders:
+            if not o.external_id:
+                continue
+            try:
+                filled = await loop.run_in_executor(
+                    None, lambda oid=o.external_id: executor._client.get_order_by_id(oid)
+                )
+                status = str(getattr(filled, "status", "")).lower()
+                fqty = float(getattr(filled, "filled_qty", 0) or 0)
+                fpx = float(getattr(filled, "filled_avg_price", 0) or 0)
+                if "filled" in status and fqty > 0:
+                    logger.info("[reconcile] updating stuck order %s %s qty=%.4f px=%.4f",
+                                o.symbol, o.external_id, fqty, fpx)
+                    o.qty = fqty
+                    o.px = fpx
+                    o.status = "filled"
+                    patched += 1
+            except Exception:
+                logger.debug("[reconcile] order lookup failed %s", o.external_id, exc_info=True)
+
+        await session.commit()
+
+    logger.info("[reconcile] done — %d positions/orders patched", patched)
+    return patched

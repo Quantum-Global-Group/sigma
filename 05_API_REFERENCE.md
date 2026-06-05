@@ -312,6 +312,265 @@ Return usage for the current billing period.
 
 ---
 
+## Trading & operations (house book)
+
+Read-only views of the worker-managed house book plus execution controls. These endpoints observe or steer the **single** internal book — not per-customer trading. Auth is the same API key as signals; internal-only actions also require `X-Internal-Secret` (must match `INTERNAL_SECRET` on API and worker).
+
+```http
+X-Internal-Secret: <same value as INTERNAL_SECRET>
+Authorization: Bearer sk_live_...
+```
+
+| Header | When required |
+|--------|----------------|
+| `Authorization` | All endpoints below |
+| `X-Internal-Secret` | `POST /execution/*` (except none on GET status), `POST /models/promotions/{id}/approve\|reject` |
+
+---
+
+### Positions
+
+#### `GET /positions`
+
+List open or recently closed positions from the `positions` table.
+
+**Query params**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `asset_class` | string | — | `equity` · `crypto` · `option` · `forex` |
+| `open_only` | bool | `true` | When `true`, only rows with `closed=false` |
+| `limit` | int | 50 | Max rows (1–500) |
+
+**Response `200`** — array of:
+
+```json
+{
+  "id": "uuid",
+  "asset_class": "equity",
+  "symbol": "AAPL",
+  "qty": 10.0,
+  "entry_px": 185.42,
+  "entry_ts": "2026-06-01T14:30:00Z",
+  "current_px": 187.10,
+  "unrealized_pnl": 16.80,
+  "realized_pnl": 0.0,
+  "closed": false,
+  "closed_at": null
+}
+```
+
+---
+
+### Orders
+
+#### `GET /orders`
+
+Recent fills from the `orders` table (newest first).
+
+**Query params**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `asset_class` | string | — | Filter by asset class |
+| `symbol` | string | — | Filter (uppercased server-side) |
+| `limit` | int | 50 | Max rows (1–500) |
+
+**Response `200`** — array of:
+
+```json
+{
+  "id": "uuid",
+  "asset_class": "equity",
+  "symbol": "AAPL",
+  "ts": "2026-06-01T14:31:00Z",
+  "side": "buy",
+  "qty": 10.0,
+  "px": 185.50,
+  "fee": 0.0,
+  "slippage_bps": 2.5,
+  "executor": "alpaca",
+  "external_id": "broker-order-id",
+  "status": "filled"
+}
+```
+
+---
+
+### Execution
+
+#### `GET /execution/status`
+
+Current executor mode, per-class tick cadence defaults, and paused asset classes (from Redis).
+
+**Response `200`**
+
+```json
+{
+  "executor_mode": "paper",
+  "coinbase_sandbox": true,
+  "worker_asset_classes_default_crypto_seconds": 300,
+  "worker_asset_classes_default_equity_seconds": 300,
+  "worker_asset_classes_default_option_seconds": 900,
+  "worker_asset_classes_default_forex_seconds": 300,
+  "paused": ["forex"]
+}
+```
+
+#### `POST /execution/run_cycle`
+
+Run one worker tick on demand. **Internal-only.**
+
+**Request**
+
+```json
+{ "asset_class": "equity" }
+```
+
+**Response `200`**
+
+```json
+{ "asset_class": "equity", "triggered": true }
+```
+
+#### `POST /execution/pause` · `POST /execution/resume`
+
+Halt or resume one asset class without redeploying. **Internal-only.** Pause is stored in Redis; the worker skips ticks but keeps heartbeats (`status: paused`). See [`docs/RUNBOOK_WORKER.md`](./docs/RUNBOOK_WORKER.md).
+
+**Request**
+
+```json
+{ "asset_class": "equity", "reason": "FOMC" }
+```
+
+**Response `200`**
+
+```json
+{ "asset_class": "equity", "paused": true }
+```
+
+#### `GET /execution/preflight` · `POST /execution/approve_live` · `POST /execution/revoke_live`
+
+Go-live guardrail checks and session-scoped live-trading approval. **Internal-only.** Details in [`docs/GO_LIVE.md`](./docs/GO_LIVE.md).
+
+---
+
+### Strategies (performance)
+
+Aggregates from `signal_history.component_weights` — contribution frequency, strength, and win rate above a threshold for labeled rows.
+
+#### `GET /strategies/performance`
+
+**Query params**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `asset_class` | string | `equity` | `equity` · `crypto` · `forex` · `option` |
+| `period` | string | — | Rolling window, e.g. `7d`, `24h` (overrides `since`) |
+| `since` | ISO datetime | — | Only signals after this time |
+| `strength_threshold` | float | `0.3` | Min strategy strength for win-rate bucket |
+| `limit` | int | 5000 | Max signal rows scanned (1–50000) |
+
+**Response `200`**
+
+```json
+{
+  "asset_class": "equity",
+  "period": "7d",
+  "since": "2026-05-26T00:00:00+00:00",
+  "strength_threshold": 0.3,
+  "n_signals": 1200,
+  "n_labeled": 800,
+  "strategies": [
+    {
+      "strategy": "ict",
+      "n_signals": 1200,
+      "contribution_count": 400,
+      "contribution_frequency": 0.3333,
+      "avg_strength_when_present": 0.45,
+      "n_above_threshold": 120,
+      "n_labeled_above_threshold": 90,
+      "win_rate_above_threshold": 0.52,
+      "avg_realized_return_above_threshold": 0.0012
+    }
+  ],
+  "summary": "# Strategy report — equity (7d)\n..."
+}
+```
+
+#### `GET /strategies/performance/report`
+
+Same stats as `/performance` with `period` defaulting to `7d` and markdown `summary` always included. Use for weekly M1 review (dashboard: `/strategies`).
+
+---
+
+### Models (lifecycle)
+
+Human-approval surface for champion promotions. GETs use API key only; approve/reject require internal secret.
+
+#### `GET /models/champions`
+
+Active model version per `(asset_class, model_type)`.
+
+```json
+[
+  {
+    "asset_class": "equity",
+    "model_type": "ensemble",
+    "version": "v1.0",
+    "updated_at": "2026-06-01T00:00:00Z"
+  }
+]
+```
+
+#### `GET /models/promotions`
+
+**Query:** `status` = `pending` | `approved` | `rejected`, `limit` (default 50).
+
+#### `GET /models/evaluations`
+
+**Query:** `asset_class`, `model_version`, `limit`.
+
+#### `GET /models/promotions/{id}/report`
+
+Candidate vs incumbent metrics, deltas, markdown `summary`, and `recommendation` (`review` | `candidate_leads` | `promoted` | `rejected`).
+
+#### `POST /models/promotions/{id}/approve` · `POST /models/promotions/{id}/reject`
+
+**Internal-only.** Activates or declines a pending promotion; worker picks up champion from `model_champions` on next tick.
+
+---
+
+### Worker health
+
+#### `GET /health/worker`
+
+No API key required. Liveness from Redis heartbeats written each tick.
+
+**Response `200`**
+
+```json
+{
+  "status": "ok",
+  "workers": {
+    "equity": {
+      "ts": "2026-06-02T15:00:00+00:00",
+      "status": "ok",
+      "duration_s": 12.4,
+      "age_seconds": 45.2,
+      "stale": false,
+      "paused": false,
+      "healthy": true
+    }
+  },
+  "opend": { "reachable": true, "ts": "..." }
+}
+```
+
+`status` is `degraded` if any class is stale or in error; `unknown` if no heartbeats exist. Paused classes count as healthy when fresh.
+
+---
+
 ## Error Format
 
 All errors return consistent JSON:

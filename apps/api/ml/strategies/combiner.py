@@ -99,6 +99,8 @@ def _resolve_strategy_config(asset_class: Optional[str]) -> tuple[str, str]:
         return settings.crypto_strategies, settings.crypto_strategy_weights
     if asset_class == "equity" and settings.equity_strategies.strip():
         return settings.equity_strategies, settings.equity_strategy_weights
+    if asset_class == "forex" and settings.forex_strategies.strip():
+        return settings.forex_strategies, settings.forex_strategy_weights
     return settings.enabled_strategies, settings.strategy_weights
 
 

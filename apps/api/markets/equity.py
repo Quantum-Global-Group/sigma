@@ -17,7 +17,7 @@ class EquityAdapter(MarketAdapter):
     asset_class = "equity"
 
     def fetch_ohlcv(self, symbol: str, timeframe: str = "daily") -> pd.DataFrame:
-        """Reliable multi-source OHLCV (Tiingo → Alpaca → yfinance).
+        """Reliable multi-source OHLCV (Alpaca → Tiingo).
 
         Source order and credentials come from settings.equity_data_providers;
         see markets/equity_data.py. Raises ValueError if every provider fails."""

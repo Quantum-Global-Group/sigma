@@ -36,7 +36,7 @@ class OrderOut(BaseModel):
 @router.get("", response_model=list[OrderOut])
 async def list_orders(
     auth: AuthDep,
-    asset_class: Optional[str] = Query(None, pattern="^(equity|crypto)$"),
+    asset_class: Optional[str] = Query(None, pattern="^(equity|crypto|option|forex)$"),
     symbol: Optional[str] = Query(None, max_length=32),
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),

@@ -71,13 +71,19 @@ CLERK_SECRET_KEY=sk_test_...
 CLERK_JWT_KEY=...                   # Get from Clerk dashboard → JWT Templates
 
 # ─── Market Data ─────────────────────────────────────────────────
-# yfinance is free — no key needed
-# Optional: IEX Cloud for higher rate limits
-IEX_API_KEY=                        # Optional — leave blank to use yfinance
+# Equity OHLCV: Alpaca primary, Tiingo fallback (comma-separated order)
+EQUITY_DATA_PROVIDERS=alpaca,tiingo
+TIINGO_API_KEY=                     # Tiingo token — https://www.tiingo.com/account/api/token
 
 # ─── ML Models ───────────────────────────────────────────────────
 MODEL_DIR=./ml/saved_models         # Where trained .pkl / .pt files live
 MODEL_VERSION=v1.0
+MLFLOW_TRACKING_URI=                # Optional; defaults to local sqlite under apps/api
+
+# pgvector signal embeddings (worker scheduler — default off)
+EMBED_SIGNALS_ENABLED=false         # Nightly embed job in apps/worker/scheduler.py
+EMBED_SIGNALS_INTERVAL_HOURS=24
+EMBED_SIGNALS_LIMIT=1000
 
 # ─── Quantum ─────────────────────────────────────────────────────
 # IBM Quantum (already configured in your environment)

@@ -133,6 +133,24 @@ def main() -> int:
     model.save(str(out_path))
     logger.info("saved %s (%.1f KB)", out_path, out_path.stat().st_size / 1024)
 
+    try:
+        from ml.experiment import start_run
+        card = {
+            "asset_class": "crypto",
+            "model_type": "ranking",
+            "version": args.version,
+            "symbols": symbols,
+            "timeframe": args.timeframe,
+            "backend": model.backend,
+            "artifact": str(out_path),
+        }
+        with start_run(f"ranking-crypto-{args.version}",
+                       tags={"asset_class": "crypto", "model_type": "ranking"}) as run:
+            run.log_params(card)
+            run.log_artifact(str(out_path))
+    except Exception:
+        logger.debug("MLflow logging skipped for ranking train", exc_info=True)
+
     logger.info("registry will load this on the next worker tick — no further wiring needed")
     return 0
 

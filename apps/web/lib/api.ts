@@ -4,15 +4,20 @@ import type {
   BacktestRequest,
   BacktestResult,
   CreateKeyResponse,
+  EquityPoint,
   ExecutionStatus,
+  OptionCandidate,
+  OptionExposure,
+  OptionPosition,
   Order,
+  PnlSummary,
   Position,
   RebalanceResponse,
   SignalResponse,
   UsageSummary,
 } from "@sigma/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
 
 async function apiFetch<T>(
   path: string,
@@ -146,6 +151,44 @@ export async function fetchOrders(
 
 export async function fetchExecutionStatus(apiKey: string): Promise<ExecutionStatus> {
   return apiFetch<ExecutionStatus>("/execution/status", apiKey);
+}
+
+// ─── Options ─────────────────────────────────────────────────────────────────
+
+export type { OptionCandidate, OptionExposure, OptionPosition } from "@sigma/types";
+
+export async function fetchOptionCandidates(
+  underlying: string,
+  apiKey: string,
+  expiry?: string,
+): Promise<OptionCandidate[]> {
+  const params = new URLSearchParams({ underlying });
+  if (expiry) params.set("expiry", expiry);
+  return apiFetch<OptionCandidate[]>(`/options/candidates?${params.toString()}`, apiKey);
+}
+
+export async function fetchOptionPositions(
+  apiKey: string,
+  openOnly: boolean = true,
+): Promise<OptionPosition[]> {
+  const params = new URLSearchParams({ open_only: String(openOnly) });
+  return apiFetch<OptionPosition[]>(`/options/positions?${params.toString()}`, apiKey);
+}
+
+export async function fetchOptionExposure(apiKey: string): Promise<OptionExposure> {
+  return apiFetch<OptionExposure>("/options/exposure", apiKey);
+}
+
+// ─── P&L (portfolio-level + equity curve) ────────────────────────────────────
+
+export type { PnlSummary, EquityPoint } from "@sigma/types";
+
+export async function fetchPortfolioPnl(apiKey: string): Promise<PnlSummary> {
+  return apiFetch<PnlSummary>("/portfolio/pnl", apiKey);
+}
+
+export async function fetchEquityCurve(apiKey: string, days: number = 30): Promise<EquityPoint[]> {
+  return apiFetch<EquityPoint[]>(`/portfolio/equity-curve?days=${days}`, apiKey);
 }
 
 /**

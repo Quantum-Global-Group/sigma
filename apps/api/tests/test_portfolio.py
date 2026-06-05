@@ -1,6 +1,6 @@
 """
 Portfolio rebalance endpoint tests.
-All external calls (yfinance, CVXPY, QAOA) are mocked.
+All external calls (Alpaca/Tiingo, CVXPY, QAOA) are mocked.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch

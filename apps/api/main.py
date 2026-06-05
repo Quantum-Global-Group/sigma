@@ -13,10 +13,13 @@ from routers import (
     health,
     internal,
     keys,
+    models,
+    options,
     orders,
     portfolio,
     positions,
     signals,
+    strategy_reports,
     usage,
 )
 
@@ -60,7 +63,7 @@ def create_app() -> FastAPI:
     app.add_middleware(StructuredLoggingMiddleware)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=settings.cors_origin_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -76,6 +79,9 @@ def create_app() -> FastAPI:
     app.include_router(positions.router)
     app.include_router(orders.router)
     app.include_router(execution.router)
+    app.include_router(options.router)
+    app.include_router(models.router)
+    app.include_router(strategy_reports.router)
 
     return app
 

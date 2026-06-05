@@ -5,6 +5,7 @@ class:
   crypto → settings.crypto_executor   (coinbase | paper)
   equity → settings.equity_executor   (alpaca   | paper)
   option → settings.option_executor   (moomoo   | paper)
+  forex  → settings.forex_executor    (oanda | mt5 | paper)
 
 The legacy global `settings.executor_mode` still works as a fallback for
 older deploys: if it's set to something other than "paper" it overrides the
@@ -39,6 +40,8 @@ def _resolve_mode(asset_class: str) -> str:
         return (settings.equity_executor or "paper").lower()
     if asset_class == "option":
         return (settings.option_executor or "paper").lower()
+    if asset_class == "forex":
+        return (settings.forex_executor or "paper").lower()
     return "paper"
 
 
@@ -56,6 +59,12 @@ def get_executor(asset_class: str = "crypto") -> Executor:
     if mode == "moomoo":
         from .moomoo import MoomooExecutor
         return MoomooExecutor()
+    if mode == "oanda":
+        from .oanda import OandaExecutor
+        return OandaExecutor()
+    if mode in ("mt5", "mt5_bridge"):
+        from .mt5_bridge import Mt5BridgeExecutor
+        return Mt5BridgeExecutor()
     raise ValueError(f"Unknown executor mode {mode!r} for asset_class {asset_class!r}")
 
 

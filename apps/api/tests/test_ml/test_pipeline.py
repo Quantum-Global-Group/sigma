@@ -77,7 +77,8 @@ class TestBuildFeatures:
     def test_all_expected_columns_present(self):
         df = _make_ohlcv()
         features = build_features(df)
-        expected = {"rsi_14", "roc_10", "ema_20", "ema_50", "ema_ratio", "bb_width", "atr_14", "volume_ratio", "ret_1d", "ret_5d"}
+        expected = {"rsi_14", "roc_10", "ema_ratio", "bb_width", "atr_14", "volume_ratio",
+                    "ret_1d", "ret_5d", "zscore_20", "vol_regime", "rsi_7", "hl_range", "up_frac_10"}
         assert expected.issubset(set(features.columns))
 
     def test_no_nans_after_warmup(self):

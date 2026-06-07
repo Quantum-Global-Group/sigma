@@ -128,7 +128,11 @@ def market_order(
         "price": price,
         "deviation": int(deviation if deviation is not None else settings.mt5_deviation_points),
         "magic": 260603,
-        "comment": client_order_id[:31],
+        # MT5 rejects comments with punctuation (e.g. ':') AND comments that are
+        # too long (this build errors -2 'Invalid comment' at >=~30 chars — a
+        # 30-char exit0 client_order_id failed; <=28 verified OK via order_check).
+        # Sanitize to alnum/underscore and cap well under the limit.
+        "comment": "".join(c if c.isalnum() else "_" for c in client_order_id)[:24],
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_IOC,
     }

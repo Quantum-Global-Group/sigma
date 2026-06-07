@@ -31,6 +31,7 @@ from cache.worker_status import (  # noqa: E402
     acquire_singleton,
     is_paused,
     refresh_singleton,
+    release_singleton,
     write_heartbeat,
 )
 
@@ -122,6 +123,12 @@ async def run_loop(asset_classes: Iterable[str], stop: asyncio.Event) -> None:
                 scheduler.shutdown(wait=False)
             except Exception:
                 logger.warning("scheduler shutdown failed", exc_info=True)
+        # Release the singleton lock so the next worker can start immediately
+        # (rather than waiting out the lock TTL).
+        try:
+            await release_singleton(instance_id)
+        except Exception:
+            logger.warning("singleton release failed", exc_info=True)
 
 
 def _maybe_start_scheduler(asset_classes: list[str]):

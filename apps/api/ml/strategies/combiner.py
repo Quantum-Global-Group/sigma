@@ -170,6 +170,14 @@ def build_default_combiner(asset_class: Optional[str] = None) -> StrategyCombine
     # Forex 4h: apply calibrated parameters instead of daily-bar defaults.
     param_overrides = _FOREX_4H_PARAMS if asset_class == "forex" else {}
 
+    # Phase C: prefer learned per-strategy weights (fit from each strategy's
+    # labeled directional hit-rate) when available; else the equal/CSV weights.
+    from ml.strategy_weights import load_learned_weights
+    learned = load_learned_weights(asset_class)
+    use_learned = bool(learned) and any(learned.get(n, 0.0) > 0 for n in names)
+    if use_learned:
+        logger.info("combiner[%s]: using learned strategy weights", asset_class)
+
     strategies: dict[str, BaseStrategy] = {}
     weights: dict[str, float] = {}
     for name, w in zip(names, raw_weights):
@@ -182,7 +190,7 @@ def build_default_combiner(asset_class: Optional[str] = None) -> StrategyCombine
             strategies[name] = factory(**kwargs)
         except TypeError:
             strategies[name] = factory()   # fallback if strategy doesn't accept kwargs
-        weights[name] = float(w)
+        weights[name] = float(learned.get(name, 0.0)) if use_learned else float(w)
 
     if not strategies:
         # Never break startup: fall back to all registered strategies, equal weight.

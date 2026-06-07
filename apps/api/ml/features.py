@@ -55,6 +55,19 @@ def build_features(df: pd.DataFrame, headlines: list[str] | None = None) -> pd.D
     out["ret_5d"]  = close.pct_change(5)
     out["ret_10d"] = close.pct_change(10)
 
+    # --- Added (Phase E): stronger, price-normalized predictive features ---
+    # Mean-reversion: z-score of price vs its 20-bar mean
+    out["zscore_20"] = (close - rolling_mean) / (rolling_std + 1e-10)
+    # Volatility regime: short vs long realized vol (>1 = vol expanding)
+    rets = close.pct_change()
+    out["vol_regime"] = rets.rolling(10).std() / (rets.rolling(30).std() + 1e-10)
+    # Faster RSI for shorter-horizon momentum
+    out["rsi_7"] = _rsi(close, 7)
+    # Intrabar range relative to price (range-based volatility)
+    out["hl_range"] = (high - low) / (close + 1e-10)
+    # Trend persistence: fraction of up-bars over the last 10
+    out["up_frac_10"] = (close.diff() > 0).rolling(10).mean()
+
     # Optional sentiment (FinBERT) — added only when token is configured
     if headlines and settings.huggingface_token:
         try:

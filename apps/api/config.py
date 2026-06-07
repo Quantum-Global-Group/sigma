@@ -21,6 +21,9 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     debug: bool = True
+    # SQLAlchemy statement echo. Off by default — it floods logs; use Langfuse
+    # traces / Sentry / the web dashboard for observability instead of SQL logs.
+    db_echo: bool = False
     api_port: int = 8001
     api_host: str = "0.0.0.0"
     secret_key: str = "change-me"
@@ -210,7 +213,7 @@ class Settings(BaseSettings):
     # Forex 4h bars move 0.07-0.17% median — 0.1% threshold gives ~40% BUY/SELL balance.
     label_threshold_equity: float = 0.005
     label_threshold_forex: float = 0.001
-    label_threshold_crypto: float = 0.005
+    label_threshold_crypto: float = 0.002   # 5m bars rarely move 0.5%; 0.2% gives real BUY/SELL labels (was ~97% HOLD)
 
     # Self-evolving model loop. Promotion is human-gated: the loop proposes a
     # champion change when a candidate beats the incumbent by min_improvement on
@@ -272,7 +275,7 @@ class Settings(BaseSettings):
     crypto_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier"
     # heston removed: saturated at +1.0 every bar (zero information content)
     # breakout removed: stuck at 0.0 on daily bars for current liquid universe
-    equity_strategies: str = "momentum,mean_reversion,regime,ml,macd,fourier,gbm,ou,ict"
+    equity_strategies: str = "momentum,mean_reversion,breakout,regime,ml,macd,fourier,gbm,ou,heston,ict"
     # Forex trades H4 bars, so the SDE strategies (gbm/ou/heston) — which assume
     # daily bars (dt=1/252) — are excluded.
     # breakout removed: stuck at 0.0 on 4h forex bars
@@ -283,9 +286,13 @@ class Settings(BaseSettings):
     forex_strategy_weights: str = ""
     min_signal_confidence: float = 0.3
     min_signal_confidence_forex: float = 0.15   # forex combiner scores lower; separate floor
+    # Phase C: blend strategies by their learned directional edge (fit from
+    # labeled signal_history) instead of equal weights. Falls back to equal when
+    # no weights file / no measurable edge yet.
+    use_learned_strategy_weights: bool = True
     # Minimum number of strategies that must vote in the same direction as the
     # combined signal before it is treated as actionable. 0 = disabled.
-    min_strategy_agreement: int = 4             # equity: 4 of 9 must agree
+    min_strategy_agreement: int = 3             # equity: 3 of 11 must agree (incl. heston/breakout)
     # Forex agreement filter: 2/6 strategies must vote same direction.
     # Using 2 (not 3) because momentum signals are weak (0.01-0.02) and only ML + one
     # technical strategy typically agree on strong moves. Requires vote_threshold=0.01
@@ -294,7 +301,7 @@ class Settings(BaseSettings):
     # Per-asset vote threshold: minimum |strength| for a strategy to count as a vote.
     # Forex signals are weaker (0.01–0.05 range vs equity 0.05–0.2), so use a
     # lower threshold when the forex filter is re-enabled.
-    strategy_agreement_vote_threshold: float = 0.05        # equity
+    strategy_agreement_vote_threshold: float = 0.03        # equity (lowered: graded strategies — momentum/macd/gbm — score small intraday; 0.05 excluded them from the agreement vote)
     strategy_agreement_vote_threshold_forex: float = 0.01  # forex (weaker signals)
     strategy: StrategyParams = StrategyParams()
 

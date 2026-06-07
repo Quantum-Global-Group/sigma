@@ -184,3 +184,18 @@ async def refresh_singleton(instance_id: str, ttl: int) -> bool:
     except Exception:
         logger.warning("singleton refresh failed (Redis?) — proceeding", exc_info=True)
         return True
+
+
+async def release_singleton(instance_id: str) -> None:
+    """Release the singleton lock on graceful shutdown so the next worker can
+    start immediately (no waiting out the TTL). Best-effort: only deletes the
+    lock when it's still ours, so we never steal it from a successor; Redis
+    errors are swallowed."""
+    try:
+        r = get_redis()
+        current = await r.get(LOCK_KEY)
+        if current in (None, instance_id):
+            await r.delete(LOCK_KEY)
+            logger.info("singleton lock released (%s)", instance_id)
+    except Exception:
+        logger.warning("singleton release failed (Redis?)", exc_info=True)

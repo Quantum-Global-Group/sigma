@@ -53,6 +53,7 @@ async def label_and_evaluate_job(asset_classes: list[str]) -> None:
     from ml.evaluation import evaluate_model
     from ml.labeling import label_outcomes
     from ml.promotion import get_champion_version
+    from ml.strategy_weights import fit_and_store
 
     async with AsyncSessionLocal() as session:
         for ac in asset_classes:
@@ -60,7 +61,11 @@ async def label_and_evaluate_job(asset_classes: list[str]) -> None:
                 labeled = await label_outcomes(session, ac)
                 version = await get_champion_version(session, ac) or settings.model_version
                 await evaluate_model(session, ac, version)
-                logger.info("[scheduler] %s: labeled %d, evaluated %s", ac, labeled, version)
+                # Phase C: refit per-strategy blend weights from the freshly
+                # labeled hit-rate (best-effort; equal weights stay if no edge).
+                weights = await fit_and_store(session, ac)
+                logger.info("[scheduler] %s: labeled %d, evaluated %s, weights=%s",
+                            ac, labeled, version, "learned" if weights else "equal")
             except Exception:
                 logger.exception("[scheduler] label/evaluate failed for %s", ac)
         await session.commit()

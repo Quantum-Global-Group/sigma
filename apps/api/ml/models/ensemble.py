@@ -47,11 +47,18 @@ class EnsembleSignalModel(BaseSignalModel):
         self._fitted = False
 
     def train(self, X: pd.DataFrame, y: np.ndarray) -> None:
+        from sklearn.utils.class_weight import compute_sample_weight
+
         self.feature_names = list(X.columns)
-        self.rf.fit(X.values, y)
-        self.xgb.fit(X.values, y)
+        # Class-balanced sample weights so the model doesn't collapse to the
+        # majority class. Labels are heavily HOLD-skewed (crypto 5m ~97% HOLD,
+        # forex ~60%); without balancing both RF and XGB just predict HOLD and
+        # never emit BUY/SELL — the source of the trained-model degeneracy.
+        sample_weight = compute_sample_weight(class_weight="balanced", y=y)
+        self.rf.fit(X.values, y, sample_weight=sample_weight)
+        self.xgb.fit(X.values, y, sample_weight=sample_weight)
         self._fitted = True
-        logger.info("EnsembleSignalModel trained on %d samples", len(X))
+        logger.info("EnsembleSignalModel trained on %d samples (class-balanced)", len(X))
 
     def predict(self, features: pd.DataFrame) -> SignalResult:
         if not self._fitted or features.empty:

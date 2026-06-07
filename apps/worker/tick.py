@@ -166,6 +166,13 @@ async def tick_once(asset_class: str, equity: Optional[float] = None) -> None:
 
         await session.commit()
 
+    # Flush Langfuse traces emitted this tick (no-op when tracing disabled).
+    try:
+        from ml.langfuse_tracing import flush
+        flush()
+    except Exception:
+        pass
+
 
 def _adapter_for_symbol(asset_class: str, symbol: str, default_adapter):
     if asset_class == "forex":
@@ -305,13 +312,25 @@ async def _process_symbol(
         if asset_class == "forex"
         else settings.strategy_agreement_vote_threshold
     )
-    combined = combiner.combine_signals(
-        symbol, feats, px_now,
-        model_predictions=_model_pred(model, symbol, df),
-        min_agreement=min_agreement,
-        vote_threshold=vote_threshold,
-    )
-    result = combine_to_result(combined, model_version=model_version)
+    from ml.langfuse_tracing import child_span
+    with child_span("signal", asset_class=asset_class, symbol=symbol) as _trace_span:
+        combined = combiner.combine_signals(
+            symbol, feats, px_now,
+            model_predictions=_model_pred(model, symbol, df),
+            min_agreement=min_agreement,
+            vote_threshold=vote_threshold,
+        )
+        result = combine_to_result(combined, model_version=model_version)
+        try:
+            _trace_span.update(output={
+                "signal": result.signal,
+                "confidence": round(float(result.confidence), 4),
+                "strength": round(float(combined.strength), 4),
+                "model_version": model_version,
+                "component_signals": (result.component_weights or {}).get("component_signals", {}),
+            })
+        except Exception:
+            pass
     rec.features.update(_snapshot_audit_features(feats))
     rec.features.update({
         "strength": combined.strength,

@@ -5,7 +5,15 @@ from __future__ import annotations
 import numpy as np
 
 from config import settings
-from ml.costs import apply_cost, cost_bps, cost_frac, net_returns, sharpe
+from ml.costs import (
+    apply_cost,
+    cost_bps,
+    cost_frac,
+    max_drawdown,
+    net_returns,
+    passes_net_edge,
+    sharpe,
+)
 
 
 def test_cost_bps_reads_config_per_asset():
@@ -41,6 +49,21 @@ def test_net_returns_default_charges_all():
     out = net_returns([0.01, 0.01], "forex")
     c = settings.cost_bps_forex / 1e4
     assert np.allclose(out, [0.01 - c, 0.01 - c])
+
+
+def test_passes_net_edge():
+    c = cost_bps("crypto") / 1e4
+    assert passes_net_edge(c + 1e-6, "crypto") is True
+    assert passes_net_edge(c - 1e-6, "crypto") is False
+    assert passes_net_edge(-(c + 1e-6), "crypto") is True   # uses magnitude
+    assert passes_net_edge(0.0, "equity") is False
+
+
+def test_max_drawdown():
+    assert max_drawdown([]) == 0.0
+    assert max_drawdown([0.1, 0.1, 0.1]) == 0.0               # monotonic up → no DD
+    # equity curve: +0.10, then -0.30 (peak 0.10 → trough -0.20) → DD 0.30
+    assert abs(max_drawdown([0.10, -0.30, 0.05]) - 0.30) < 1e-9
 
 
 def test_sharpe_basic_and_degenerate():

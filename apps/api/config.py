@@ -233,6 +233,12 @@ class Settings(BaseSettings):
     # {asset}_meta_{version}.pkl artifact loads, so this is a no-op until trained.
     meta_labeling_assets: str = "crypto"   # comma-separated asset classes
     meta_tau: float = 0.55                 # P(win) gate; below → HOLD
+    # Cost-aware net-edge gate (item #4): skip BUY entries whose |predicted_return|
+    # does not exceed the round-trip cost (guaranteed net loser in expectation).
+    cost_aware_gate: bool = True
+    # Confidence-based Kelly sizing: feed the meta P(win) into kelly_optimal's
+    # win_rate for meta-labeled assets (symmetric barriers ⇒ payoff ratio ≈ 1).
+    kelly_from_meta: bool = True
     # Worker-internal scheduler (APScheduler) — runs only on the singleton holder.
     worker_scheduler_enabled: bool = True
     label_interval_hours: int = 24            # nightly: label outcomes + evaluate champion

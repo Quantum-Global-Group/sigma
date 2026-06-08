@@ -403,6 +403,19 @@ async def _process_symbol(
         return
     rec.gate("G5_kill_switch", True)
 
+    # 4c. Cost-aware net-edge gate (item #4): skip BUY entries whose expected edge
+    #     doesn't clear the round-trip transaction cost (net loser in expectation).
+    if result.signal == "BUY" and settings.cost_aware_gate:
+        from ml.costs import cost_frac, passes_net_edge
+        if not passes_net_edge(result.predicted_return, asset_class):
+            rec.gate("G5b_net_edge", False,
+                     [f"edge {abs(result.predicted_return):.4f} <= cost {cost_frac(asset_class):.4f}"]
+                     ).finalize("skipped")
+            logger.info("[%s] %s net-edge gate: |pred|=%.4f <= cost=%.4f",
+                        asset_class, symbol, abs(result.predicted_return), cost_frac(asset_class))
+            return
+        rec.gate("G5b_net_edge", True)
+
     # 5. Size + place order.
     side = Side.BUY if result.signal == "BUY" else Side.SELL
 
@@ -427,7 +440,15 @@ async def _process_symbol(
             client_order_id=_client_order_id(asset_class, symbol, "sell", signal_ts),
         )
     else:
-        sized = sizer.kelly_optimal(price=px_now, signal=combined.strength)
+        # Confidence-based sizing (item #4): for meta-labeled assets, result.confidence
+        # is the calibrated P(win) — feed it as Kelly win_rate. Symmetric barriers ⇒
+        # payoff ratio ≈ 1, so kelly ≈ 2·P(win) − 1, scaled by |strength| and capped.
+        kelly_kwargs: dict = {}
+        if settings.kelly_from_meta and asset_class in _meta_assets():
+            from ml.models.registry import resolve_meta
+            if resolve_meta(asset_class) is not None:
+                kelly_kwargs = dict(win_rate=float(result.confidence), avg_win=0.02, avg_loss=0.02)
+        sized = sizer.kelly_optimal(price=px_now, signal=combined.strength, **kelly_kwargs)
         rec.risk.update({
             "qty": sized.qty,
             "notional": sized.notional,

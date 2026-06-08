@@ -58,6 +58,24 @@ def net_returns(
     return g - mask * cost_frac(asset_class)
 
 
+def passes_net_edge(predicted_return: float, asset_class: str) -> bool:
+    """True if the expected edge clears the round-trip cost (skip marginal trades).
+
+    A signal whose |predicted_return| does not exceed transaction cost is a
+    guaranteed net loser in expectation, so it should not be traded."""
+    return abs(float(predicted_return)) > cost_frac(asset_class)
+
+
+def max_drawdown(returns: Sequence[float]) -> float:
+    """Max peak-to-trough drop of the cumulative (additive) return curve. >= 0."""
+    r = np.asarray(returns, dtype=float)
+    if r.size == 0:
+        return 0.0
+    eq = np.cumsum(r)
+    peak = np.maximum.accumulate(eq)
+    return float(np.max(peak - eq))
+
+
 def sharpe(returns: Sequence[float], periods_per_year: int = 252) -> float | None:
     """Annualized Sharpe ratio of a per-bar return series. None if undefined."""
     r = np.asarray(returns, dtype=float)

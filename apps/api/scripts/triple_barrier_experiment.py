@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 from sklearn.utils.class_weight import compute_sample_weight
 
-from ml.costs import cost_frac, sharpe
+from ml.costs import cost_frac, max_drawdown, sharpe
 from ml.cv import purged_train_test_split
 from ml.features import build_features
 from ml.meta_label import MetaLabeler
@@ -123,12 +123,13 @@ def _build_symbol(asset, cfg, sym):
 def _policy(tb_ret, side, asset, sizing=None):
     taken = side != 0
     if taken.sum() == 0:
-        return dict(n=0, net=0.0, sharpe=None, prec=None)
+        return dict(n=0, net=0.0, sharpe=None, prec=None, mdd=None)
     pnl = tb_ret[taken] * np.sign(side[taken])
     f = np.ones(taken.sum()) if sizing is None else sizing[taken]
     pnl = f * pnl - f * cost_frac(asset)
     return dict(n=int(taken.sum()), net=float(pnl.sum()),
-                sharpe=sharpe(pnl, periods_per_year=1), prec=float((pnl > 0).mean()))
+                sharpe=sharpe(pnl, periods_per_year=1), prec=float((pnl > 0).mean()),
+                mdd=max_drawdown(pnl))
 
 
 META_COLS_EXTRA = ["strength", "conf", "side", "abs_strength", "recent_hit"]
@@ -196,7 +197,8 @@ def run_asset(asset, cfg):
     def fmt(m):
         s = f"{m['sharpe']:.3f}" if m["sharpe"] is not None else "n/a"
         p = f"{m['prec']:.3f}" if m["prec"] is not None else "n/a"
-        return f"n={m['n']:4d} net={m['net']:+.4f} sharpe={s} prec={p}"
+        dd = f"{m['mdd']:.4f}" if m.get("mdd") is not None else "n/a"
+        return f"n={m['n']:4d} net={m['net']:+.4f} sharpe={s} prec={p} mdd={dd}"
 
     print(f"{asset:6} BASE       {fmt(_policy(TEret, side_base, asset))}")
     print(f"{asset:6} COMB       {fmt(_policy(TEret, TEside, asset))}")

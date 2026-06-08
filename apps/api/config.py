@@ -221,6 +221,12 @@ class Settings(BaseSettings):
     # approves via /models/promotions before it goes live.
     promotion_min_improvement: float = 0.02   # +2 pts directional accuracy
     promotion_min_samples: int = 50
+    # Per-asset round-trip transaction cost in basis points (bps). Used by the
+    # measure-first research harnesses to report net-of-cost PnL/Sharpe, and (when
+    # wired) by the worker's net-edge gate before sizing. Conservative defaults.
+    cost_bps_equity: float = 2.0    # ~1bp commission + ~1bp slippage
+    cost_bps_forex: float = 1.0     # spread-dominated on majors
+    cost_bps_crypto: float = 8.0    # wider spreads + taker fees
     # Worker-internal scheduler (APScheduler) — runs only on the singleton holder.
     worker_scheduler_enabled: bool = True
     label_interval_hours: int = 24            # nightly: label outcomes + evaluate champion

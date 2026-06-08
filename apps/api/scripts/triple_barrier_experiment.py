@@ -87,6 +87,13 @@ def _build_symbol(asset, cfg, sym):
     band = cfg["band"]
     side = np.where(strength > band, 1, np.where(strength < -band, -1, 0)).astype(int)
 
+    # Causal meta feature: was the combiner directionally right on recent bars?
+    # comb_right_j resolves at bar j+1, so a rolling mean shifted by 1 uses only
+    # outcomes already known by bar t ("is the combiner on a hot streak?").
+    ret1 = pd.Series(close).pct_change().shift(-1).fillna(0.0).to_numpy()
+    comb_right = (np.sign(strength) == np.sign(ret1)).astype(float)
+    recent_hit = pd.Series(comb_right).rolling(20).mean().shift(1).fillna(0.5).to_numpy()
+
     # triple-barrier outcomes (per bar)
     tb = triple_barrier(close, target, pt_mult=cfg["pt"], sl_mult=cfg["sl"], vbar_bars=cfg["vbar"])
     tb_ret = tb["ret"].to_numpy()
@@ -109,7 +116,7 @@ def _build_symbol(asset, cfg, sym):
     ev = np.where(valid & (np.arange(len(df)) < len(df) - 1))[0]
     return dict(
         feat=feat, fcols=list(mf.columns), ybase=ybase, side=side, strength=strength,
-        conf=conf, tb_ret=tb_ret, t_touch=t_touch, ev=ev,
+        conf=conf, tb_ret=tb_ret, t_touch=t_touch, ev=ev, recent_hit=recent_hit,
     )
 
 
@@ -124,42 +131,52 @@ def _policy(tb_ret, side, asset, sizing=None):
                 sharpe=sharpe(pnl, periods_per_year=1), prec=float((pnl > 0).mean()))
 
 
+META_COLS_EXTRA = ["strength", "conf", "side", "abs_strength", "recent_hit"]
+TAU_GRID = [0.50, 0.55, 0.60, 0.65]
+
+
+def _meta_matrix(feat, strength, conf, side, recent_hit):
+    return np.column_stack([
+        feat, strength, conf, side.astype(float), np.abs(strength), recent_hit,
+    ])
+
+
 def run_asset(asset, cfg):
     Xb_tr, yb_tr = [], []
     Xm_tr, ym_tr = [], []
-    # test-side accumulators
-    te_feat, te_side, te_str, te_conf, te_tbret = [], [], [], [], []
+    te_feat, te_side, te_str, te_conf, te_rh, te_tbret = [], [], [], [], [], []
+    fcols = None
     for sym in cfg["symbols"]:
         d = _build_symbol(asset, cfg, sym)
         if d is None or len(d["ev"]) < 60:
             continue
         ev = d["ev"]
-        t_start = ev.astype(float)
-        t_end = d["t_touch"][ev].astype(float)
-        tr_i, te_i = purged_train_test_split(t_start, t_end, test_frac=0.2, embargo_frac=0.01)
+        tr_i, te_i = purged_train_test_split(
+            ev.astype(float), d["t_touch"][ev].astype(float), test_frac=0.2, embargo_frac=0.01)
         tr, te = ev[tr_i], ev[te_i]
         if len(tr) < 40 or len(te) < 10:
             continue
+        fcols = d["fcols"]
 
-        # baseline ensemble training rows
         Xb_tr.append(d["feat"][tr]); yb_tr.append(d["ybase"][tr])
-        # meta training rows: only taken (non-flat) primary sides
         side_tr = d["side"][tr]
         win_tr = meta_bin(d["tb_ret"][tr], side_tr)
         take = side_tr != 0
         if take.sum() > 0:
-            xm = np.column_stack([d["feat"][tr], d["strength"][tr], d["conf"][tr], side_tr.astype(float)])
+            xm = _meta_matrix(d["feat"][tr], d["strength"][tr], d["conf"][tr], side_tr, d["recent_hit"][tr])
             Xm_tr.append(xm[take]); ym_tr.append(win_tr[take])
 
         te_feat.append(d["feat"][te]); te_side.append(d["side"][te])
-        te_str.append(d["strength"][te]); te_conf.append(d["conf"][te]); te_tbret.append(d["tb_ret"][te])
-        fcols = d["fcols"]
+        te_str.append(d["strength"][te]); te_conf.append(d["conf"][te])
+        te_rh.append(d["recent_hit"][te]); te_tbret.append(d["tb_ret"][te])
 
-    if not te_feat:
+    if not te_feat or fcols is None:
         print(f"{asset:6} insufficient data"); return
     Xb = np.vstack(Xb_tr); yb = np.concatenate(yb_tr)
     TEf = np.vstack(te_feat); TEside = np.concatenate(te_side)
-    TEstr = np.concatenate(te_str); TEconf = np.concatenate(te_conf); TEret = np.concatenate(te_tbret)
+    TEstr = np.concatenate(te_str); TEconf = np.concatenate(te_conf)
+    TErh = np.concatenate(te_rh); TEret = np.concatenate(te_tbret)
+    cols = fcols + META_COLS_EXTRA
 
     # BASE: fixed-threshold ensemble → side
     ens = EnsembleSignalModel(); ens.feature_names = fcols
@@ -168,36 +185,28 @@ def run_asset(asset, cfg):
     pred = np.argmax((ens.rf.predict_proba(TEf) + ens.xgb.predict_proba(TEf)) / 2, axis=1)
     side_base = np.where(pred == 2, 1, np.where(pred == 0, -1, 0))
 
-    # META: train meta-model, gate + size the combiner side on the test set
+    # META: train meta-model on richer features; gate + size the combiner side
     if Xm_tr:
-        meta = MetaLabeler().train(
-            pd.DataFrame(np.vstack(Xm_tr), columns=fcols + ["strength", "conf", "side"]),
-            np.concatenate(ym_tr),
-        )
-        Xm_te = pd.DataFrame(
-            np.column_stack([TEf, TEstr, TEconf, TEside.astype(float)]),
-            columns=fcols + ["strength", "conf", "side"],
-        )
+        meta = MetaLabeler().train(pd.DataFrame(np.vstack(Xm_tr), columns=cols), np.concatenate(ym_tr))
+        Xm_te = pd.DataFrame(_meta_matrix(TEf, TEstr, TEconf, TEside, TErh), columns=cols)
         pwin = meta.predict_proba_win(Xm_te)
     else:
         pwin = np.full(len(TEside), 0.5)
-    side_meta = np.where((TEside != 0) & (pwin > TAU), TEside, 0)
-    size = np.clip((pwin - 0.5) * 2.0, 0.0, 1.0)   # edge-proportional sizing
-
-    base = _policy(TEret, side_base, asset)
-    comb = _policy(TEret, TEside, asset)
-    meta_g = _policy(TEret, side_meta, asset)
-    meta_s = _policy(TEret, side_meta, asset, sizing=size)
 
     def fmt(m):
         s = f"{m['sharpe']:.3f}" if m["sharpe"] is not None else "n/a"
         p = f"{m['prec']:.3f}" if m["prec"] is not None else "n/a"
         return f"n={m['n']:4d} net={m['net']:+.4f} sharpe={s} prec={p}"
 
-    print(f"{asset:6} BASE   {fmt(base)}")
-    print(f"{asset:6} COMB   {fmt(comb)}")
-    print(f"{asset:6} META   {fmt(meta_g)}  (tau={TAU})")
-    print(f"{asset:6} META*  {fmt(meta_s)}  (P(win)-sized)")
+    print(f"{asset:6} BASE       {fmt(_policy(TEret, side_base, asset))}")
+    print(f"{asset:6} COMB       {fmt(_policy(TEret, TEside, asset))}")
+    print(f"{asset:6} COMB_FLIP  {fmt(_policy(TEret, -TEside, asset))}  (diagnostic)")
+    for tau in TAU_GRID:
+        side_meta = np.where((TEside != 0) & (pwin > tau), TEside, 0)
+        size = np.clip((pwin - 0.5) * 2.0, 0.0, 1.0)
+        g = _policy(TEret, side_meta, asset)
+        s = _policy(TEret, side_meta, asset, sizing=size)
+        print(f"{asset:6} META@{tau:.2f}  {fmt(g)}   META*  {fmt(s)}")
 
 
 def main():

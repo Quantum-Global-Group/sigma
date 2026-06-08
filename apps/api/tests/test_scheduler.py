@@ -59,15 +59,32 @@ async def test_label_and_evaluate_job_runs_per_asset_class(monkeypatch):
     assert sess.committed is True
 
 
+class _EmptyRes:
+    def scalars(self):
+        return MagicMock(all=lambda: [])
+
+
+def _ready_baseline(monkeypatch, *, n_samples=100, acc=0.5):
+    """Make the live-incumbent baseline look ready (n >= min_samples, has acc)."""
+    from ml.evaluation import EvalMetrics
+    monkeypatch.setattr(
+        "ml.evaluation.compute_metrics",
+        lambda rows: EvalMetrics(n_samples=n_samples, directional_accuracy=acc,
+                                 signal_accuracy=acc, mean_abs_error=0.0),
+    )
+
+
 @pytest.mark.asyncio
 async def test_train_and_propose_job_uses_injected_trainer(monkeypatch):
     sess = _FakeSession()
     sess.add = MagicMock()
     sess.flush = AsyncMock()
+    sess.execute = AsyncMock(return_value=_EmptyRes())
     monkeypatch.setattr(scheduler, "AsyncSessionLocal", lambda: sess)
 
     propose = AsyncMock(return_value=MagicMock())
     monkeypatch.setattr("ml.promotion.propose_promotion", propose)
+    _ready_baseline(monkeypatch)  # live baseline ready → proposal allowed
 
     def trainer(asset_class, version):
         return {"val_accuracy": 0.63, "n_val": 120}
@@ -76,6 +93,26 @@ async def test_train_and_propose_job_uses_injected_trainer(monkeypatch):
 
     sess.add.assert_called_once()           # candidate evaluation row written
     propose.assert_awaited_once()
+    # incumbent live accuracy is passed through (not a version lookup)
+    assert propose.await_args.kwargs.get("incumbent_accuracy") == 0.5
+
+
+@pytest.mark.asyncio
+async def test_train_and_propose_skips_without_live_baseline(monkeypatch):
+    sess = _FakeSession()
+    sess.add = MagicMock()
+    sess.flush = AsyncMock()
+    sess.execute = AsyncMock(return_value=_EmptyRes())
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", lambda: sess)
+
+    propose = AsyncMock(return_value=MagicMock())
+    monkeypatch.setattr("ml.promotion.propose_promotion", propose)
+    _ready_baseline(monkeypatch, n_samples=5)  # too few labeled live signals
+
+    await scheduler.train_and_propose_job(["equity"], trainer=lambda ac, v: {"val_accuracy": 0.9, "n_val": 100})
+
+    sess.add.assert_called_once()       # candidate eval still written
+    propose.assert_not_awaited()        # but no promotion proposed without a baseline
 
 
 @pytest.mark.asyncio

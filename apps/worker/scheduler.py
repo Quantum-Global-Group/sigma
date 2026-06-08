@@ -127,7 +127,10 @@ async def train_and_propose_job(
 
 async def _train_candidate_and_propose(session, asset_class: str, version: str,
                                        trainer: Callable[[str, str], Optional[dict]]) -> None:
-    from db.models import ModelEvaluation
+    from sqlalchemy import select
+
+    from db.models import ModelEvaluation, SignalHistory
+    from ml.evaluation import compute_metrics
     from ml.promotion import propose_promotion
 
     loop = asyncio.get_event_loop()
@@ -136,20 +139,35 @@ async def _train_candidate_and_propose(session, asset_class: str, version: str,
         logger.info("[scheduler] %s: candidate %s training unavailable — skipped", asset_class, version)
         return
 
-    # Holdout evaluation row for the candidate (directional_accuracy proxied by
-    # holdout val accuracy; clearly labeled in metrics/notes).
+    # Candidate's out-of-sample (walk-forward) holdout accuracy.
     session.add(ModelEvaluation(
         asset_class=asset_class, model_type="ensemble", model_version=version,
         n_samples=int(metrics.get("n_val", metrics.get("n_samples", 0)) or 0),
         directional_accuracy=metrics.get("val_accuracy"),
         signal_accuracy=metrics.get("val_accuracy"),
-        metrics={**metrics, "source": "training_holdout"},
-        notes="holdout evaluation (candidate has no live signals yet)",
+        metrics={**metrics, "source": "walk_forward_holdout"},
+        notes="walk-forward holdout (candidate not yet served live)",
     ))
     await session.flush()
-    promo = await propose_promotion(session, asset_class, version)
+
+    # Incumbent baseline = the LIVE model's real directional accuracy on labeled
+    # signals. Only propose when a trustworthy, sufficiently-sampled live baseline
+    # exists to beat — otherwise an unmeasured comparison would auto-promote.
+    live_rows = list((await session.execute(
+        select(SignalHistory)
+        .where(SignalHistory.asset_class == asset_class)
+        .where(SignalHistory.labeled_at.is_not(None))
+    )).scalars().all())
+    live = compute_metrics(live_rows)
+    if live.directional_accuracy is None or live.n_samples < settings.promotion_min_samples:
+        logger.info("[scheduler] %s: live baseline not ready (n=%s, acc=%s) — no promotion proposed",
+                    asset_class, live.n_samples, live.directional_accuracy)
+        return
+    promo = await propose_promotion(session, asset_class, version,
+                                    incumbent_accuracy=live.directional_accuracy)
     if promo is not None:
-        logger.info("[scheduler] %s: proposed promotion → %s (pending approval)", asset_class, version)
+        logger.info("[scheduler] %s: proposed promotion → %s (cand_oos=%s vs live=%.4f, pending approval)",
+                    asset_class, version, metrics.get("val_accuracy"), live.directional_accuracy)
 
 
 def _default_trainer(asset_class: str, version: str) -> Optional[dict]:

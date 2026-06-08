@@ -106,12 +106,14 @@ def _class_balance(y: np.ndarray) -> dict:
 
 
 def _split(X: pd.DataFrame, y: np.ndarray, val_frac: float = 0.2):
+    """Chronological (walk-forward) holdout — NO shuffle.
+
+    A random/stratified split leaks adjacent bars (bar t in train, t+1 in val)
+    so the model memorizes and posts implausible accuracy (e.g. 0.99). Training
+    on the earlier rows and validating on the most-recent tail gives an honest
+    out-of-sample estimate that reflects how the model will actually trade."""
     from sklearn.model_selection import train_test_split
-    try:
-        return train_test_split(X, y, test_size=val_frac, random_state=42, stratify=y)
-    except ValueError:
-        # Stratify fails when a class is too small — fall back to unstratified.
-        return train_test_split(X, y, test_size=val_frac, random_state=42)
+    return train_test_split(X, y, test_size=val_frac, shuffle=False)
 
 
 def _write_model_card(path_no_ext: str, card: dict) -> str:

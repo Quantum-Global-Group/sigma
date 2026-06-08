@@ -71,6 +71,7 @@ async def propose_promotion(
     model_type: str = "ensemble",
     min_improvement: Optional[float] = None,
     min_samples: Optional[int] = None,
+    incumbent_accuracy: Optional[float] = None,
 ) -> Optional[ModelPromotion]:
     """File a pending promotion if the candidate beats the incumbent. Never activates.
 
@@ -87,8 +88,14 @@ async def propose_promotion(
     incumbent_version = await get_champion_version(session, asset_class) or settings.model_version
     if incumbent_version == candidate_version:
         return None
-    incumbent = await _latest_eval(session, asset_class, model_type, incumbent_version)
-    incumbent_acc = float(incumbent.directional_accuracy) if (incumbent and incumbent.directional_accuracy is not None) else 0.0
+    if incumbent_accuracy is not None:
+        # Caller supplied the incumbent's real (live) accuracy — use it directly
+        # instead of a version-keyed eval lookup (avoids the "incumbent not found
+        # → treated as 0 → everything promotes" trap).
+        incumbent_acc = float(incumbent_accuracy)
+    else:
+        incumbent = await _latest_eval(session, asset_class, model_type, incumbent_version)
+        incumbent_acc = float(incumbent.directional_accuracy) if (incumbent and incumbent.directional_accuracy is not None) else 0.0
     cand_acc = float(cand.directional_accuracy)
 
     if cand_acc < incumbent_acc + min_imp:

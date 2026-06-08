@@ -227,6 +227,12 @@ class Settings(BaseSettings):
     cost_bps_equity: float = 2.0    # ~1bp commission + ~1bp slippage
     cost_bps_forex: float = 1.0     # spread-dominated on majors
     cost_bps_crypto: float = 8.0    # wider spreads + taker fees
+    # Meta-labeling (López de Prado): a secondary model gates/sizes the combiner
+    # signal by P(win). Measured to lift net Sharpe + precision on crypto only
+    # (equity/forex did not clear the bar). Active per asset ONLY when a
+    # {asset}_meta_{version}.pkl artifact loads, so this is a no-op until trained.
+    meta_labeling_assets: str = "crypto"   # comma-separated asset classes
+    meta_tau: float = 0.55                 # P(win) gate; below → HOLD
     # Worker-internal scheduler (APScheduler) — runs only on the singleton holder.
     worker_scheduler_enabled: bool = True
     label_interval_hours: int = 24            # nightly: label outcomes + evaluate champion

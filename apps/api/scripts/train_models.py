@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -136,7 +136,7 @@ def _base_card(asset_class, model_type, version, symbols, timeframe, threshold, 
         "n_features": int(X.shape[1]),
         "feature_names": list(X.columns),
         "class_balance": _class_balance(y),
-        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "trained_at": datetime.now(UTC).isoformat(),
     }
     if extra:
         card.update(extra)
@@ -145,6 +145,7 @@ def _base_card(asset_class, model_type, version, symbols, timeframe, threshold, 
 
 def train_ensemble(X, y, *, asset_class, version, symbols, timeframe, threshold) -> str:
     from sklearn.metrics import accuracy_score
+
     from ml.models.ensemble import EnsembleSignalModel
 
     out_path = _artifact_path(asset_class, "ensemble", version, "pkl")
@@ -237,11 +238,114 @@ def train_quantum_hybrid(X, y, *, asset_class, version, symbols, timeframe, thre
     return out_path
 
 
+# Per-asset triple-barrier defaults for meta-model training (match the harness).
+_META_DEFAULTS = {
+    "equity": dict(pt=1.5, sl=1.5, vbar=10, band=0.1),
+    "forex": dict(pt=1.5, sl=1.5, vbar=12, band=0.02),
+    "crypto": dict(pt=1.5, sl=1.5, vbar=24, band=0.1),
+}
+
+
+def build_meta_training_set(symbols, asset_class, timeframe, *, lb=160):
+    """Meta-labeling training set: per-bar combiner side + triple-barrier win label.
+
+    X columns = build_features columns + [strength, conf, side, abs_strength]
+    (exactly the serving order in ml/meta_serving). y = 1 if taking the combiner
+    side won at the first barrier touch. Only non-flat (taken) bars are included."""
+    import numpy as np
+
+    from ml.meta_serving import META_DESCRIPTORS
+    from ml.sequences import FeatureEngineer
+    from ml.strategies import build_default_combiner
+    from ml.triple_barrier import meta_bin, triple_barrier
+
+    cfg = _META_DEFAULTS.get(asset_class, _META_DEFAULTS["crypto"])
+    adapter = get_market_adapter(asset_class)
+    combiner = build_default_combiner(asset_class)
+    X_parts, y_parts, fcols = [], [], None
+
+    for symbol in symbols:
+        try:
+            df = adapter.fetch_ohlcv(symbol, timeframe)
+        except Exception as exc:
+            logger.warning("meta: skipping %s: %s", symbol, exc)
+            continue
+        if df is None or len(df) < 120:
+            continue
+        fe = FeatureEngineer().compute(df)
+        close = fe["c"].to_numpy(dtype=float)
+        atr = fe["atr"].to_numpy(dtype=float)
+        target = np.clip(atr / np.where(close > 0, close, 1.0), 1e-4, None)
+
+        strength = np.zeros(len(fe))
+        conf = np.zeros(len(fe))
+        for t in range(len(fe)):
+            try:
+                sig = combiner.combine_signals(symbol, fe.iloc[max(0, t - lb):t + 1],
+                                               float(close[t]), min_agreement=0)
+                strength[t], conf[t] = sig.strength, sig.confidence
+            except Exception:
+                pass
+        band = cfg["band"]
+        side = np.where(strength > band, 1, np.where(strength < -band, -1, 0)).astype(int)
+
+        tb = triple_barrier(close, target, pt_mult=cfg["pt"], sl_mult=cfg["sl"], vbar_bars=cfg["vbar"])
+        win = meta_bin(tb["ret"].to_numpy(), side)
+
+        mf = build_features(df)
+        pos = df.index.get_indexer(mf.index)
+        ok = pos >= 0
+        mfa = mf.to_numpy()[ok]
+        posv = pos[ok]
+        take = side[posv] != 0
+        if take.sum() == 0:
+            continue
+        descr = np.column_stack([strength[posv], conf[posv], side[posv].astype(float),
+                                 np.abs(strength[posv])])
+        Xsym = np.column_stack([mfa, descr])[take]
+        X_parts.append(Xsym)
+        y_parts.append(win[posv][take])
+        fcols = list(mf.columns) + META_DESCRIPTORS
+        logger.info("meta: %s taken-bet rows=%d", symbol, int(take.sum()))
+
+    if not X_parts:
+        raise RuntimeError("No meta training data (combiner produced no taken bets)")
+    X = pd.DataFrame(np.vstack(X_parts), columns=fcols)
+    y = np.concatenate(y_parts)
+    logger.info("meta training set: %d rows, win_rate=%.3f", len(X), float(y.mean()))
+    return X, y
+
+
+def train_meta(*, asset_class, version, symbols, timeframe) -> str:
+    from ml.meta_label import MetaLabeler
+
+    X, y = build_meta_training_set(symbols, asset_class, timeframe)
+    out_path = _artifact_path(asset_class, "meta", version, "pkl")
+    model = MetaLabeler().train(X, y)
+    model.save(out_path)
+    logger.info("Saved meta-model → %s (n=%d, win_rate=%.3f)", out_path, len(X), float(y.mean()))
+
+    card = _base_card(asset_class, "meta", version, symbols, timeframe, 0.0, X, y,
+                      extra={"win_rate": float(y.mean()), "artifact": out_path,
+                             "barrier": _META_DEFAULTS.get(asset_class)})
+    card_path = _write_model_card(out_path[:-4], card)
+    with start_run(f"meta-{asset_class}-{version}",
+                   tags={"asset_class": asset_class, "model_type": "meta"}) as run:
+        run.log_params({"asset_class": asset_class, "model_type": "meta", "version": version,
+                        "symbols": ",".join(symbols), "timeframe": timeframe, "n_samples": len(X)})
+        run.log_metrics({"win_rate": float(y.mean()), "n_samples": len(X)})
+        run.log_artifact(out_path)
+        run.log_artifact(card_path)
+    return out_path
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ensemble", action="store_true", help="Train ensemble model")
     parser.add_argument("--lstm", action="store_true", help="Train LSTM model")
     parser.add_argument("--quantum-hybrid", action="store_true", help="Train quantum-hybrid model")
+    parser.add_argument("--meta", action="store_true",
+                        help="Train meta-labeling model (triple-barrier + combiner side → P(win))")
     parser.add_argument("--all", action="store_true", help="Train all models")
     parser.add_argument("--asset-class", default="equity", choices=sorted(_DEFAULTS.keys()))
     parser.add_argument("--version", default=settings.model_version)
@@ -253,7 +357,7 @@ def main():
                              "equity=0.005, forex=0.001, crypto=0.005)")
     args = parser.parse_args()
 
-    if not (args.ensemble or args.lstm or args.quantum_hybrid or args.all):
+    if not (args.ensemble or args.lstm or args.quantum_hybrid or args.all or args.meta):
         args.ensemble = True  # default
 
     default_symbols, default_tf = _defaults_for(args.asset_class)
@@ -271,16 +375,22 @@ def main():
 
     logger.info("Training asset_class=%s version=%s symbols=%s timeframe=%s threshold=%.4f",
                 args.asset_class, args.version, symbols, timeframe, threshold)
-    X, y = build_training_set(symbols, args.asset_class, timeframe, threshold=threshold)
 
-    kw = dict(asset_class=args.asset_class, version=args.version, symbols=symbols,
-              timeframe=timeframe, threshold=threshold)
-    if args.all or args.ensemble:
-        train_ensemble(X, y, **kw)
-    if args.all or args.lstm:
-        train_lstm(X, y, **kw)
-    if args.all or args.quantum_hybrid:
-        train_quantum_hybrid(X, y, **kw)
+    # Fixed-threshold training set is only needed for the price-model heads.
+    if args.all or args.ensemble or args.lstm or args.quantum_hybrid:
+        X, y = build_training_set(symbols, args.asset_class, timeframe, threshold=threshold)
+        kw = dict(asset_class=args.asset_class, version=args.version, symbols=symbols,
+                  timeframe=timeframe, threshold=threshold)
+        if args.all or args.ensemble:
+            train_ensemble(X, y, **kw)
+        if args.all or args.lstm:
+            train_lstm(X, y, **kw)
+        if args.all or args.quantum_hybrid:
+            train_quantum_hybrid(X, y, **kw)
+
+    if args.all or args.meta:
+        train_meta(asset_class=args.asset_class, version=args.version,
+                   symbols=symbols, timeframe=timeframe)
 
 
 if __name__ == "__main__":

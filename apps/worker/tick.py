@@ -321,6 +321,10 @@ async def _process_symbol(
             vote_threshold=vote_threshold,
         )
         result = combine_to_result(combined, model_version=model_version)
+        # Meta-labeling gate (measured win on crypto): a secondary model scores
+        # P(win) of taking the combiner side; below tau → HOLD, else confidence
+        # becomes P(win). No-op unless the asset is configured AND an artifact loads.
+        result = _apply_meta_label(asset_class, result, combined, df)
         try:
             _trace_span.update(output={
                 "signal": result.signal,
@@ -723,6 +727,39 @@ async def _resolve_equity(executor, equity: Optional[float]) -> float:
     if live is not None and live > 0:
         return float(live)
     return float(settings.default_equity)
+
+
+def _meta_assets() -> set[str]:
+    return {a.strip() for a in settings.meta_labeling_assets.split(",") if a.strip()}
+
+
+def _apply_meta_label(asset_class: str, result, combined, df: pd.DataFrame):
+    """Gate/size `result` via a trained meta-model. No-op unless the asset is in
+    settings.meta_labeling_assets AND a {asset}_meta_{version}.pkl artifact loads.
+    Any failure passes the original signal through unchanged (fail-open)."""
+    if asset_class not in _meta_assets() or df is None or df.empty:
+        return result
+    try:
+        from ml.features import build_features
+        from ml.meta_serving import apply_meta_gate, build_meta_row
+        from ml.models.registry import resolve_meta
+
+        meta = resolve_meta(asset_class)
+        if meta is None:
+            return result
+        mf = build_features(df)
+        if mf.empty:
+            return result
+        row = build_meta_row(mf.iloc[[-1]], combined.strength, combined.confidence,
+                             meta.feature_names)
+        p_win = float(meta.predict_proba_win(row)[0])
+        gated = apply_meta_gate(result, p_win, settings.meta_tau)
+        logger.info("[%s] meta P(win)=%.3f tau=%.2f → %s", asset_class, p_win,
+                    settings.meta_tau, gated.signal)
+        return gated
+    except Exception:
+        logger.exception("meta-label gate failed for %s — passing signal through", asset_class)
+        return result
 
 
 def _model_pred(model, symbol: str, df: pd.DataFrame) -> dict[str, float]:

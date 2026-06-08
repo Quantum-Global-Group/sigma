@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from config import settings
 
@@ -66,7 +65,7 @@ def _load_one(model_type: str, path: Path):
 _cache: dict[tuple[str, str], object] = {}
 
 
-def resolve(asset_class: str, version: Optional[str] = None):
+def resolve(asset_class: str, version: str | None = None):
     """Return the first loadable model for the given asset class, or None."""
     version = version or settings.model_version
     key = (asset_class, version)
@@ -95,5 +94,32 @@ def resolve(asset_class: str, version: Optional[str] = None):
     return None
 
 
+_meta_cache: dict[tuple[str, str], object] = {}
+
+
+def resolve_meta(asset_class: str, version: str | None = None):
+    """Return the loadable meta-labeling model for an asset class, or None.
+
+    Artifact: {model_dir}/{asset_class}_meta_{version}.pkl. None when absent, so
+    the serving path is a safe no-op until a meta-model is trained for the asset."""
+    version = version or settings.model_version
+    key = (asset_class, version)
+    if key in _meta_cache:
+        return _meta_cache[key]
+
+    path = Path(settings.model_dir) / f"{asset_class}_meta_{version}.pkl"
+    model = None
+    if path.exists():
+        try:
+            from ml.meta_label import MetaLabeler
+            model = MetaLabeler.load(str(path))
+            logger.info("Loaded meta model for %s from %s", asset_class, path)
+        except Exception as exc:
+            logger.warning("Failed to load meta model for %s: %s", asset_class, exc)
+    _meta_cache[key] = model
+    return model
+
+
 def clear_cache() -> None:
     _cache.clear()
+    _meta_cache.clear()

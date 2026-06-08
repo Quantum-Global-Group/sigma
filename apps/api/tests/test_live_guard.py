@@ -133,9 +133,11 @@ async def test_submit_blocks_unapproved_live_order(monkeypatch):
     wd = Path(__file__).parents[2] / "worker"
     if str(wd) not in sys.path:
         sys.path.insert(0, str(wd))
-    import tick
-    from execution.base import OrderIntent, OrderType, Side, TimeInForce
     from unittest.mock import AsyncMock, MagicMock
+
+    import tick
+
+    from execution.base import OrderIntent, OrderType, Side, TimeInForce
 
     # block_reason returns a reason → the order must be skipped before place().
     async def _blocked(asset_class, executor):
@@ -154,6 +156,7 @@ async def test_submit_blocks_unapproved_live_order(monkeypatch):
         return None
     monkeypatch.setattr(tick, "already_submitted", _none)
 
-    report, pos = await tick._submit_and_persist(session, executor, intent, None)
+    report, pos, skip_reason = await tick._submit_and_persist(session, executor, intent, None)
     assert report is None                       # skipped
+    assert skip_reason == "live_blocked"        # blocked by live guard, not idempotency
     executor.place.assert_not_awaited()         # never reached the broker

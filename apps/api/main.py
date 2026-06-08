@@ -42,13 +42,27 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    from cache.redis import _pool
-    if _pool is not None:
-        await _pool.aclose()
+    import cache.redis as _redis_cache
+    if _redis_cache._pool is not None:
+        try:
+            await _redis_cache._pool.aclose()
+        except RuntimeError:
+            # Pool may have been created on a different (now-closed) event loop —
+            # e.g. across TestClient lifecycles in the test suite. Closing it then
+            # raises "Event loop is closed"; that's a benign teardown artifact.
+            pass
+        finally:
+            # Always drop the global so the next app lifecycle builds a fresh pool
+            # bound to the current event loop.
+            _redis_cache._pool = None
 
-    from ml.langfuse_tracing import flush as _flush_langfuse, is_enabled as _langfuse_enabled
+    from ml.langfuse_tracing import flush as _flush_langfuse
+    from ml.langfuse_tracing import is_enabled as _langfuse_enabled
     if _langfuse_enabled():
-        _flush_langfuse()
+        try:
+            _flush_langfuse()
+        except RuntimeError:
+            pass
 
 
 def create_app() -> FastAPI:

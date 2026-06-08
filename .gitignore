@@ -20,6 +20,7 @@ venv/
 .mypy_cache/
 *.so
 ml/saved_models/
+**/ml/saved_models/
 
 # Node
 node_modules/

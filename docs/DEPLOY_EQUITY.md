@@ -30,7 +30,7 @@ Edit `apps/worker/fly.toml` `[env]` (commit the change):
 ```toml
   WORKER_ASSET_CLASSES = "equity"
   EQUITY_EXECUTOR = "alpaca"
-  EQUITY_DATA_PROVIDERS = "tiingo,alpaca,yfinance"
+  EQUITY_DATA_PROVIDERS = "alpaca,tiingo"
   # already set: ALPACA_PAPER="true", ALPACA_ALLOW_LIVE="false",
   #              MODEL_DIR="/app/api/ml/saved_models"
 ```
@@ -45,7 +45,8 @@ cd apps/worker && fly launch --copy-config --no-deploy --org <org> --name sigma-
 ## 3. Postgres (Timescale Cloud) + Redis (Upstash)
 
 Create both in their dashboards; copy the connection strings. Timescale Cloud has
-the extension, so `002_timescaledb.sql` applies cleanly.
+the extension, so `002_timescaledb.sql` applies cleanly. Migration `012` also
+requires the **pgvector** extension (enabled on Timescale Cloud; verify before apply).
 
 ## 4. Secrets
 
@@ -66,7 +67,7 @@ fly secrets set -a sigma-api    ALPACA_API_KEY=... ALPACA_SECRET=... TIINGO_API_
 `SENTRY_DSN` on the worker is what turns the loop's `logger.exception` calls into
 alerts — set it or you're flying blind.
 
-## 5. Migrations 001–007
+## 5. Migrations 001–012
 
 ```bash
 DB=$(fly ssh console -a sigma-api -C 'env | grep ^DATABASE_URL=' | cut -d= -f2-)

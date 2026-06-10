@@ -29,7 +29,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from config import settings  # noqa: E402
 from cache.worker_status import (  # noqa: E402
     acquire_singleton,
+    is_paused,
     refresh_singleton,
+    release_singleton,
     write_heartbeat,
 )
 
@@ -40,17 +42,23 @@ logger = logging.getLogger("worker")
 async def _run_tick(asset_class: str) -> None:
     """One pass over the configured universe for `asset_class`.
 
-    Thin indirection over worker.tick.tick_once. Exceptions propagate to the
-    caller (_drive), which records them in the heartbeat and logs them — so a
-    failed tick is both visible (Sentry) and observable (GET /health/worker)."""
-    from worker.tick import tick_once as _tick
-
-    await _tick(asset_class)
+    Options use a chain-based cycle (options_tick_once); equity/crypto use the
+    OHLCV-based tick_once. Exceptions propagate to the caller (_drive)."""
+    if asset_class == "option":
+        from worker.options_tick import options_tick_once as _opt_tick
+        await _opt_tick()
+    else:
+        from worker.tick import tick_once as _tick
+        await _tick(asset_class)
 
 
 def _interval_for(asset_class: str) -> int:
     if asset_class == "crypto":
         return settings.worker_tick_seconds_crypto
+    if asset_class == "option":
+        return settings.worker_tick_seconds_option
+    if asset_class == "forex":
+        return settings.worker_tick_seconds_forex
     return settings.worker_tick_seconds_equity
 
 
@@ -66,24 +74,37 @@ async def run_loop(asset_classes: Iterable[str], stop: asyncio.Event) -> None:
         return
     logger.info("singleton lock acquired (%s)", instance_id)
 
+    # Self-evolution background jobs run only on the singleton holder, so they
+    # never double-run across instances. Optional + best-effort: a scheduler
+    # failure must never take down the trading loop.
+    scheduler = _maybe_start_scheduler(asset_classes)
+
     async def _drive(ac: str) -> None:
         interval = _interval_for(ac)
         while not stop.is_set():
             t0 = time.monotonic()
             err: str | None = None
-            try:
-                await _run_tick(ac)
-            except Exception as exc:
-                err = f"{type(exc).__name__}: {exc}"
-                logger.exception("[%s] tick raised", ac)
 
-            await write_heartbeat(
-                ac,
-                duration_s=time.monotonic() - t0,
-                status="error" if err else "ok",
-                error=err,
-                ttl=interval * 4,
-            )
+            # Per-asset-class pause: skip the tick (but keep looping) so an
+            # operator can halt one venue via POST /execution/pause and resume
+            # it later without a redeploy.
+            if await is_paused(ac):
+                logger.info("[%s] paused — skipping tick", ac)
+                await write_heartbeat(ac, duration_s=0.0, status="paused", ttl=interval * 4)
+            else:
+                try:
+                    await _run_tick(ac)
+                except Exception as exc:
+                    err = f"{type(exc).__name__}: {exc}"
+                    logger.exception("[%s] tick raised", ac)
+
+                await write_heartbeat(
+                    ac,
+                    duration_s=time.monotonic() - t0,
+                    status="error" if err else "ok",
+                    error=err,
+                    ttl=interval * 4,
+                )
             if not await refresh_singleton(instance_id, lock_ttl):
                 logger.error("lost singleton lock — stopping worker")
                 stop.set()
@@ -94,7 +115,39 @@ async def run_loop(asset_classes: Iterable[str], stop: asyncio.Event) -> None:
             except asyncio.TimeoutError:
                 pass
 
-    await asyncio.gather(*(_drive(ac) for ac in asset_classes))
+    try:
+        await asyncio.gather(*(_drive(ac) for ac in asset_classes))
+    finally:
+        if scheduler is not None:
+            try:
+                scheduler.shutdown(wait=False)
+            except Exception:
+                logger.warning("scheduler shutdown failed", exc_info=True)
+        # Release the singleton lock so the next worker can start immediately
+        # (rather than waiting out the lock TTL).
+        try:
+            await release_singleton(instance_id)
+        except Exception:
+            logger.warning("singleton release failed", exc_info=True)
+
+
+def _maybe_start_scheduler(asset_classes: list[str]):
+    """Start the worker-internal self-evolution scheduler, or return None.
+
+    Disabled via WORKER_SCHEDULER_ENABLED=false, and degrades to None if
+    APScheduler isn't installed — the trading loop runs regardless."""
+    if not settings.worker_scheduler_enabled:
+        logger.info("worker scheduler disabled (WORKER_SCHEDULER_ENABLED=false)")
+        return None
+    try:
+        from worker.scheduler import build_scheduler
+        scheduler = build_scheduler(asset_classes)
+        scheduler.start()
+        logger.info("self-evolution scheduler started")
+        return scheduler
+    except Exception:
+        logger.warning("could not start self-evolution scheduler — continuing without it", exc_info=True)
+        return None
 
 
 def _parse_asset_classes() -> list[str]:
@@ -121,8 +174,22 @@ def _init_sentry() -> None:
         logger.warning("Sentry init failed — continuing without it", exc_info=True)
 
 
+def _maybe_install_synthetic() -> None:
+    """Offline full-run: swap in synthetic market data so every asset class trades
+    without network/creds (forex keeps real OANDA when a token is set)."""
+    if not settings.synthetic_data:
+        return
+    try:
+        from sim.synthetic import install_synthetic_providers
+        installed = install_synthetic_providers()
+        logger.warning("SYNTHETIC_DATA on — synthetic providers for %s", installed)
+    except Exception:
+        logger.exception("failed to install synthetic providers")
+
+
 def main() -> None:
     _init_sentry()
+    _maybe_install_synthetic()
     asset_classes = _parse_asset_classes()
     if not asset_classes:
         logger.error("WORKER_ASSET_CLASSES is empty — nothing to do")

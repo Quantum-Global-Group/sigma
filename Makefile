@@ -1,4 +1,4 @@
-.PHONY: dev migrate seed test lint format logs clean help package-gumroad load-test worker worker-local train-ranking
+.PHONY: dev dev-api dev-web migrate seed test lint format logs clean help package-gumroad load-test worker worker-local train-ranking e2e e2e-down
 
 MIGRATIONS_DIR := packages/db/migrations
 PG_USER        := postgres
@@ -7,6 +7,8 @@ PG_DB          := sigma
 help:
 	@echo "SIGMA — available targets:"
 	@echo "  make dev      Start Docker services (run API + web manually in separate terminals)"
+	@echo "  make dev-api  Start FastAPI on 0.0.0.0:\$$API_PORT (default 8001)"
+	@echo "  make dev-web  Start Next.js on 0.0.0.0:\$$WEB_PORT (default 3001)"
 	@echo "  make migrate  Apply database migrations in order"
 	@echo "  make seed     Seed dev database with test data"
 	@echo "  make test     Run all tests (Python + TypeScript type-check)"
@@ -19,13 +21,22 @@ help:
 	@echo "  make worker           Start the live trading worker in Docker (uses --profile worker)"
 	@echo "  make worker-local     Run the worker directly against local Postgres+Redis"
 	@echo "  make train-ranking    Fetch Coinbase history and fit the crypto RankingModel"
+	@echo "  make e2e              Real end-to-end smoke vs local Postgres+Redis (offline, paper)"
 
 dev:
 	docker compose up -d
 	@echo ""
 	@echo "Docker services running. Start servers in separate terminals:"
-	@echo "  Terminal 1:  cd apps/api && uvicorn main:app --reload --port 8000"
-	@echo "  Terminal 2:  cd apps/web && npm run dev"
+	@echo "  Terminal 1:  make dev-api"
+	@echo "  Terminal 2:  make dev-web"
+	@echo ""
+	@echo "Split-server: set NEXT_PUBLIC_API_URL on the web host and CORS_ORIGINS on the API host."
+
+dev-api:
+	cd apps/api && .venv/bin/uvicorn main:app --reload --host $${API_HOST:-0.0.0.0} --port $${API_PORT:-8001}
+
+dev-web:
+	cd apps/web && npm run dev -- -H 0.0.0.0 -p $${WEB_PORT:-3001}
 
 migrate:
 	@echo "Running migrations..."
@@ -70,8 +81,23 @@ worker:
 	docker compose logs -f worker
 
 worker-local:
-	cd apps/api && PYTHONPATH=. python -m worker.main
+	cd apps/api && PYTHONPATH=.:.. .venv/bin/python -c "from dotenv import load_dotenv; load_dotenv('.env'); import runpy; runpy.run_module('worker.main', run_name='__main__')"
 
 train-ranking:
 	cd apps/api && PYTHONPATH=. python scripts/train_ranking.py $(ARGS)
+
+# Real end-to-end proof: brings up Postgres+Redis, applies migrations, seeds, and
+# runs the offline smoke (synthetic data + paper executor) — asserting real rows
+# land in every table. No external creds. See docs/E2E_VALIDATION.md.
+e2e:
+	docker compose up -d postgres redis
+	@echo "Waiting for Postgres..."
+	@until docker compose exec -T postgres pg_isready -U $(PG_USER) -d $(PG_DB) >/dev/null 2>&1; do sleep 1; done
+	$(MAKE) migrate
+	$(MAKE) seed
+	cd apps/api && DATABASE_URL=postgresql+asyncpg://$(PG_USER):password@localhost:5432/$(PG_DB) \
+		REDIS_URL=redis://localhost:6379 PYTHONPATH=. python scripts/e2e_smoke.py --clean
+
+e2e-down:
+	docker compose stop postgres redis
 

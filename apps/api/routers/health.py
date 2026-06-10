@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from sqlalchemy import text
 
 from cache.redis import redis_ping
-from cache.worker_status import read_heartbeats
+from cache.worker_status import read_heartbeats, read_mt5_bridge_status, read_opend_status
 from config import settings
 from db.connection import AsyncSessionLocal
 
@@ -40,13 +40,22 @@ async def worker_health():
     writes each tick. A heartbeat is 'stale' once older than 2x its asset class's
     tick cadence. Overall status is ok only if every heartbeat is fresh + ok."""
     heartbeats = await read_heartbeats()
+    opend = await read_opend_status()
+    mt5_bridge = await read_mt5_bridge_status()
     if not heartbeats:
-        return {"status": "unknown", "detail": "no worker heartbeats found", "workers": {}}
+        out = {"status": "unknown", "detail": "no worker heartbeats found", "workers": {}}
+        if opend is not None:
+            out["opend"] = opend
+        if mt5_bridge is not None:
+            out["mt5_bridge"] = mt5_bridge
+        return out
 
     now = datetime.now(timezone.utc)
     cadence = {
         "crypto": settings.worker_tick_seconds_crypto,
         "equity": settings.worker_tick_seconds_equity,
+        "option": settings.worker_tick_seconds_option,
+        "forex": settings.worker_tick_seconds_forex,
     }
     workers: dict[str, dict] = {}
     overall_ok = True
@@ -57,13 +66,22 @@ async def worker_health():
             age = None
         max_age = cadence.get(asset_class, 900) * 2
         stale = age is None or age > max_age
-        healthy = (hb.get("status") == "ok") and not stale
+        # A paused class is intentionally idle — fresh + paused is healthy, not degraded.
+        paused = hb.get("status") == "paused"
+        healthy = (hb.get("status") in ("ok", "paused")) and not stale
         overall_ok = overall_ok and healthy
         workers[asset_class] = {
             **hb,
             "age_seconds": round(age, 1) if age is not None else None,
             "stale": stale,
+            "paused": paused,
             "healthy": healthy,
         }
 
-    return {"status": "ok" if overall_ok else "degraded", "workers": workers}
+    out = {"status": "ok" if overall_ok else "degraded", "workers": workers}
+    # OpenD gateway reachability (options worker supervision), when probed.
+    if opend is not None:
+        out["opend"] = opend
+    if mt5_bridge is not None:
+        out["mt5_bridge"] = mt5_bridge
+    return out

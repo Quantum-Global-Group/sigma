@@ -1,8 +1,9 @@
-import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 
+import { getAuthUserId } from "@/lib/clerk";
+
 export default async function BillingPage() {
-  const { userId } = await auth();
+  const userId = await getAuthUserId();
   if (!userId) redirect("/sign-in");
 
   // The Stripe billing portal URL is generated server-side when the user has

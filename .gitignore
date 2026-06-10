@@ -20,6 +20,7 @@ venv/
 .mypy_cache/
 *.so
 ml/saved_models/
+**/ml/saved_models/
 
 # Node
 node_modules/
@@ -45,4 +46,5 @@ Thumbs.db
 
 # Local-only docker-compose port overrides (added during PR #1 verification)
 docker-compose.override.yml
-
+# Spark Flow runtime state
+.spark-flow/

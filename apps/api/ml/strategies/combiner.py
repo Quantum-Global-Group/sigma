@@ -61,6 +61,8 @@ class StrategyCombiner:
         features: pd.DataFrame,
         current_price: float,
         model_predictions: Optional[Mapping[str, float]] = None,
+        min_agreement: int = 0,
+        vote_threshold: float = 0.05,
     ) -> Signal:
         signals: dict[str, Signal] = {}
         for name, strategy in self.strategies.items():
@@ -81,13 +83,42 @@ class StrategyCombiner:
             total_strength += sig.strength * w
             total_confidence += sig.confidence * w
 
+        strength   = float(np.clip(total_strength, -1.0, 1.0))
+        confidence = float(np.clip(total_confidence, 0.0, 1.0))
+
+        # Agreement filter: count how many strategies vote in the same direction
+        # as the combined signal. If fewer than min_agreement agree, collapse to
+        # a neutral (strength=0) signal so it resolves to HOLD at the gate.
+        if min_agreement > 0 and strength != 0.0:
+            direction = 1 if strength > 0 else -1
+            votes = sum(
+                1 for sig in signals.values()
+                if sig.strength * direction > vote_threshold
+            )
+            metadata_agreement = {"agreement_votes": votes, "agreement_required": min_agreement}
+            if votes < min_agreement:
+                return Signal(
+                    strength=0.0,
+                    confidence=confidence * 0.5,   # preserve partial confidence for audit
+                    method="combined",
+                    metadata={
+                        "component_signals": {n: s.strength for n, s in signals.items()},
+                        "component_confidence": {n: s.confidence for n, s in signals.items()},
+                        **metadata_agreement,
+                        "agreement_veto": True,
+                    },
+                )
+        else:
+            metadata_agreement = {}
+
         return Signal(
-            strength=float(np.clip(total_strength, -1.0, 1.0)),
-            confidence=float(np.clip(total_confidence, 0.0, 1.0)),
+            strength=strength,
+            confidence=confidence,
             method="combined",
             metadata={
                 "component_signals": {name: s.strength for name, s in signals.items()},
                 "component_confidence": {name: s.confidence for name, s in signals.items()},
+                **metadata_agreement,
             },
         )
 
@@ -99,7 +130,21 @@ def _resolve_strategy_config(asset_class: Optional[str]) -> tuple[str, str]:
         return settings.crypto_strategies, settings.crypto_strategy_weights
     if asset_class == "equity" and settings.equity_strategies.strip():
         return settings.equity_strategies, settings.equity_strategy_weights
+    if asset_class == "forex" and settings.forex_strategies.strip():
+        return settings.forex_strategies, settings.forex_strategy_weights
     return settings.enabled_strategies, settings.strategy_weights
+
+
+# Strategy parameter overrides for 4h forex bars.
+# Default parameters were designed for daily equity bars (dt=1/252).
+# 4h bars ≈ 6 bars/day, so multiply daily bar counts by 6 to preserve
+# equivalent real-time lookback windows.
+_FOREX_4H_PARAMS: dict[str, dict] = {
+    "momentum":      {"momentum_periods": [6, 12, 24, 48, 120]},   # 1d/2d/4d/8d/20d
+    "mean_reversion": {"bb_period": 48},                            # ~1 week of 4h bars
+    "macd":          {"fast_period": 48, "slow_period": 104, "signal_period": 36},
+    "fourier":       {"lookback_period": 128},                      # ~3 weeks, catches weekly cycles
+}
 
 
 def build_default_combiner(asset_class: Optional[str] = None) -> StrategyCombiner:
@@ -107,7 +152,11 @@ def build_default_combiner(asset_class: Optional[str] = None) -> StrategyCombine
 
     crypto/equity pull their own strategy lists (SDE is equity-only — it
     assumes daily bars). With no asset_class, or an empty per-asset list, this
-    falls back to the legacy global enabled_strategies."""
+    falls back to the legacy global enabled_strategies.
+
+    Forex uses 4h bars — strategy parameters are scaled accordingly via
+    _FOREX_4H_PARAMS so lookback windows represent the same real-time duration
+    as their daily-bar defaults."""
     names_csv, weights_csv = _resolve_strategy_config(asset_class)
     names = [s.strip() for s in names_csv.split(",") if s.strip()]
     raw_weights = [float(w.strip()) for w in weights_csv.split(",") if w.strip()]
@@ -118,6 +167,17 @@ def build_default_combiner(asset_class: Optional[str] = None) -> StrategyCombine
         raw_weights.append(0.0)
     raw_weights = raw_weights[: len(names)]
 
+    # Forex 4h: apply calibrated parameters instead of daily-bar defaults.
+    param_overrides = _FOREX_4H_PARAMS if asset_class == "forex" else {}
+
+    # Phase C: prefer learned per-strategy weights (fit from each strategy's
+    # labeled directional hit-rate) when available; else the equal/CSV weights.
+    from ml.strategy_weights import load_learned_weights
+    learned = load_learned_weights(asset_class)
+    use_learned = bool(learned) and any(learned.get(n, 0.0) > 0 for n in names)
+    if use_learned:
+        logger.info("combiner[%s]: using learned strategy weights", asset_class)
+
     strategies: dict[str, BaseStrategy] = {}
     weights: dict[str, float] = {}
     for name, w in zip(names, raw_weights):
@@ -125,8 +185,12 @@ def build_default_combiner(asset_class: Optional[str] = None) -> StrategyCombine
         if factory is None:
             logger.warning("Unknown strategy %r in strategy config — skipping", name)
             continue
-        strategies[name] = factory()
-        weights[name] = float(w)
+        kwargs = param_overrides.get(name, {})
+        try:
+            strategies[name] = factory(**kwargs)
+        except TypeError:
+            strategies[name] = factory()   # fallback if strategy doesn't accept kwargs
+        weights[name] = float(learned.get(name, 0.0)) if use_learned else float(w)
 
     if not strategies:
         # Never break startup: fall back to all registered strategies, equal weight.

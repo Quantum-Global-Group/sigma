@@ -11,13 +11,14 @@
 #     --org <your-org> --name sigma-worker
 #   fly secrets set INTERNAL_SECRET=... DATABASE_URL=... REDIS_URL=... \
 #                   COINBASE_API_KEY_NAME=... COINBASE_PRIVATE_KEY=... \
-#                   SENTRY_DSN=... HUGGINGFACE_TOKEN=...
+#                   SENTRY_DSN=... HUGGINGFACE_TOKEN=... \
+#                   OANDA_API_TOKEN=... OANDA_ACCOUNT_ID=...   # forex (DEPLOY_FOREX.md)
 #   # Re-use sigma-pg + Upstash Redis from the api app (set DATABASE_URL/REDIS_URL
 #   # to the same private flycast addresses).
 # Deploy:
 #   fly deploy
 
-app = "sigma-worker"
+app = "sigma-worker-proud-tree-92"
 primary_region = "ord"
 kill_signal = "SIGTERM"
 kill_timeout = "60s"  # let the current tick finish before stopping
@@ -29,14 +30,26 @@ kill_timeout = "60s"  # let the current tick finish before stopping
 
 [env]
   ENVIRONMENT = "production"
-  WORKER_ASSET_CLASSES = "crypto"   # add "equity" once Alpaca secrets are set
+  # Comma-separated. Forex runs on Fly (OANDA is cloud REST); OPTIONS DO NOT —
+  # Moomoo OpenD is a local gateway, so options run on a separate local/VPS
+  # worker (see docs/DEPLOY_OPTIONS.md). Add "equity"/"forex" as secrets land.
+  WORKER_ASSET_CLASSES = "equity"
   CRYPTO_EXECUTOR = "paper"         # flip to "coinbase" when ready
-  EQUITY_EXECUTOR = "paper"         # flip to "alpaca" when ready
+  EQUITY_EXECUTOR = "alpaca"
+  EQUITY_DATA_PROVIDERS = "alpaca,tiingo"
+  FOREX_EXECUTOR = "paper"          # flip to "oanda" when ready (see DEPLOY_FOREX.md)
   WORKER_TICK_SECONDS_CRYPTO = "300"
   WORKER_TICK_SECONDS_EQUITY = "900"
+  WORKER_TICK_SECONDS_FOREX = "900"
   SENTIMENT_PROVIDER = "finbert"
   ALPACA_PAPER = "true"
   ALPACA_ALLOW_LIVE = "false"
+  OANDA_ENVIRONMENT = "practice"    # practice | live
+  OANDA_PAPER = "true"
+  OANDA_ALLOW_LIVE = "false"
+  # Self-evolution background jobs (label/evaluate/train/snapshot) run on the
+  # singleton holder. Set false to disable.
+  WORKER_SCHEDULER_ENABLED = "true"
   # The worker image copies apps/api to /app/api (CMD runs from /app), so the
   # bundled model artifact lives at /app/api/ml/saved_models — point MODEL_DIR
   # there explicitly. The default "./ml/saved_models" resolves to /app/ml/...

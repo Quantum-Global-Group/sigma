@@ -17,7 +17,10 @@ def _make_ohlcv(n: int = 60) -> pd.DataFrame:
 def test_build_features_columns():
     df = _make_ohlcv()
     features = build_features(df)
-    expected_cols = {"rsi_14", "roc_10", "ema_20", "ema_50", "ema_ratio", "bb_width", "atr_14", "volume_ratio", "ret_1d", "ret_5d"}
+    # Core schema (raw ema_20/ema_50 levels are intentionally not emitted —
+    # not cross-symbol portable) plus the Phase E additions.
+    expected_cols = {"rsi_14", "roc_10", "ema_ratio", "bb_width", "atr_14", "volume_ratio",
+                     "ret_1d", "ret_5d", "zscore_20", "vol_regime", "rsi_7", "hl_range", "up_frac_10"}
     assert expected_cols.issubset(set(features.columns))
 
 

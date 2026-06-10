@@ -15,10 +15,10 @@ from typing import Annotated
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from db.models import APIKey, User
+from markets.equity_data import fetch_equity_ohlcv
 from middleware.auth import require_api_key
 from middleware.rate_limit import check_rate_limit
 from models.backtest import BacktestRequest, BacktestResult, EquityPoint, TradeEntry
@@ -38,17 +38,15 @@ REBALANCE_RULES = {
 
 def _fetch_panel(tickers: list[str], start: str, end: str) -> pd.DataFrame:
     """Return adjusted close panel (rows=date, cols=ticker)."""
-    data = yf.download(tickers, start=start, end=end, progress=False, auto_adjust=True, group_by="ticker")
-    if data is None or data.empty:
-        raise ValueError("No historical data returned for the requested window")
+    series: dict[str, pd.Series] = {}
+    for ticker in tickers:
+        df = fetch_equity_ohlcv(ticker, "daily", start=start, end=end)
+        close = df["close"]
+        if close.index.tz is not None:
+            close = close.tz_convert("UTC").tz_localize(None)
+        series[ticker] = close
 
-    if isinstance(data.columns, pd.MultiIndex):
-        closes = pd.DataFrame({t: data[t]["Close"] for t in tickers if t in data.columns.get_level_values(0)})
-    else:
-        # Single ticker — yfinance returns flat columns
-        closes = data[["Close"]].rename(columns={"Close": tickers[0]})
-
-    closes = closes.dropna(how="all").ffill().dropna()
+    closes = pd.DataFrame(series).dropna(how="all").ffill().dropna()
     if closes.empty:
         raise ValueError("No overlapping price data across tickers")
     return closes

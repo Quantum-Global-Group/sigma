@@ -1,10 +1,11 @@
-import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+
 import { PlanBadge } from "@/components/billing/PlanBadge";
 import { UsageMeter } from "@/components/billing/UsageMeter";
+import { getAuthUserId } from "@/lib/clerk";
 
 export default async function DashboardPage() {
-  const { userId } = await auth();
+  const userId = await getAuthUserId();
   if (!userId) redirect("/sign-in");
 
   // In a full implementation the user's active key would come from the DB.

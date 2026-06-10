@@ -144,7 +144,15 @@ class HestonVolStrategy(BaseStrategy):
         for k, v in params.items():
             setattr(self.heston, k, v)
         rets = hist.pct_change().dropna()
-        forecast_vol = self.heston.forecast_volatility(rets.var(), horizon=5)["mean_volatility"]
+        # forecast_volatility returns a PER-BAR vol (it is built from rets.var()),
+        # so annualize it to match hist_vol below. Without this, forecast_vol
+        # (~0.01-0.02) was always far below the annualized hist_vol (~0.2-0.5),
+        # making `ratio` strongly negative every bar and clipping strength to a
+        # constant +1.0 — the source of the system-wide long-only bias (no SELLs).
+        forecast_vol = (
+            self.heston.forecast_volatility(rets.var(), horizon=5)["mean_volatility"]
+            * np.sqrt(252)
+        )
         hist_vol = rets.std() * np.sqrt(252)
         if hist_vol <= 0:
             return Signal(0.0, 0.0, self.name)

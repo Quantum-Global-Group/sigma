@@ -1,4 +1,4 @@
-export type AssetClass = "equity" | "crypto";
+export type AssetClass = "equity" | "crypto" | "option" | "forex";
 
 export type Position = {
   id: string;
@@ -34,4 +34,69 @@ export type ExecutionStatus = {
   coinbase_sandbox: boolean;
   worker_asset_classes_default_crypto_seconds: number;
   worker_asset_classes_default_equity_seconds: number;
+  worker_asset_classes_default_option_seconds: number;
+};
+
+export type OptionPosition = Position & {
+  underlying: string | null;
+  expiry: string | null;     // ISO date
+  strike: number | null;
+  right: "call" | "put" | null;
+  multiplier: number | null;
+  meta: Record<string, unknown> | null;
+};
+
+export type NetGreeks = {
+  delta: number;
+  gamma: number;
+  theta: number;
+  vega: number;
+};
+
+export type OptionCandidate = {
+  underlying: string;
+  strategy: string;
+  score: number;
+  liquidity: number;
+  alignment: number;
+  risk_reward: number;
+  regime: string;
+  iv_rank: number;
+  net_delta: number;
+  max_loss: number;
+  max_profit: number;
+  breakevens: number[];
+  rationale: Record<string, unknown>;
+};
+
+export type OptionExposure = {
+  net_greeks: NetGreeks;
+  positions_count: number;
+  greek_limits_ok: boolean;
+  greek_breaches: string[];
+};
+
+export type AssetClassPnl = {
+  realized: number;
+  unrealized: number;
+  open_positions: number;
+  total: number;
+};
+
+export type PnlSummary = {
+  total_realized: number;
+  total_unrealized: number;
+  total_pnl: number;
+  open_positions: number;
+  by_asset_class: Record<string, AssetClassPnl>;
+  base_equity: number;
+  total_value: number;
+};
+
+export type EquityPoint = {
+  ts: string;
+  base_equity: number;
+  total_realized: number;
+  total_unrealized: number;
+  total_value: number;
 };

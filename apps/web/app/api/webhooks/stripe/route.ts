@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Webhook signature verification failed" }, { status: 400 });
   }
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
   const internalSecret = process.env.INTERNAL_SECRET ?? "";
 
   switch (event.type) {

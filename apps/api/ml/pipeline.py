@@ -15,7 +15,7 @@ def run_signal_pipeline(
     """Fetch market data, build features, run inference. Returns a SignalResult.
 
     The market data source is chosen by `asset_class` via the MarketAdapter
-    registry (yfinance for equities, Coinbase for crypto)."""
+    registry (Alpaca/Tiingo for equities, Coinbase for crypto)."""
     adapter = get_market_adapter(asset_class)
     with trace_pipeline(ticker, timeframe) as root:
         with child_span("fetch_ohlcv", ticker=ticker, timeframe=timeframe, asset_class=asset_class) as fetch:

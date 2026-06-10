@@ -37,7 +37,7 @@ build_dashboard_template() {
   cat > "${stage}/README.md" <<'EOF'
 # SIGMA Dashboard Template
 
-A polished Next.js 15 (App Router) + Tailwind dashboard shell with billing, API key,
+A polished Next.js 16 (App Router) + Tailwind dashboard shell with billing, API key,
 signal explorer, and portfolio screens. Drop into any project that uses Clerk for auth.
 
 ## What's included
@@ -81,7 +81,7 @@ build_ml_boilerplate() {
 fastapi>=0.110
 pandas
 numpy
-yfinance
+httpx
 pandas-ta
 scikit-learn
 xgboost

@@ -88,10 +88,11 @@ class Settings(BaseSettings):
     equity_executor: str = "paper"
     option_executor: str = "paper"
     forex_executor: str = "paper"
-    # Deprecated global toggle, kept as a fallback for older deploys. If set to
-    # something other than "paper", it overrides the per-asset default for that
-    # venue. New config should use crypto_executor / equity_executor.
-    executor_mode: str = "paper"  # paper | coinbase (legacy)
+    # Deprecated crypto-only toggle, kept as a fallback for older deploys. If
+    # set to something other than "paper", it overrides crypto_executor — and
+    # only crypto_executor; other asset classes always use their own setting.
+    # New config should use crypto_executor / equity_executor / etc.
+    executor_mode: str = "paper"  # paper | coinbase (legacy, crypto-only)
 
     # Execution — Alpaca (equities), via the modern alpaca-py SDK
     alpaca_api_key: str = ""

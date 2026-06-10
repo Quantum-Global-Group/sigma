@@ -131,3 +131,39 @@ def test_get_executor_unknown_mode(monkeypatch):
     monkeypatch.setattr(cfg, "equity_executor", "bogus")
     with pytest.raises(ValueError, match="Unknown executor mode"):
         get_executor("equity")
+
+
+# ─── legacy executor_mode override is crypto-only ─────────────────────────────
+
+def test_legacy_executor_mode_does_not_hijack_equity(monkeypatch):
+    """EXECUTOR_MODE=coinbase must never route equity to the Coinbase executor."""
+    from config import settings as cfg
+    monkeypatch.setattr(cfg, "executor_mode", "coinbase")
+    monkeypatch.setattr(cfg, "equity_executor", "paper")
+    assert isinstance(get_executor("equity"), PaperExecutor)
+
+
+def test_legacy_executor_mode_does_not_hijack_forex_or_option(monkeypatch):
+    from config import settings as cfg
+    monkeypatch.setattr(cfg, "executor_mode", "coinbase")
+    monkeypatch.setattr(cfg, "forex_executor", "paper")
+    monkeypatch.setattr(cfg, "option_executor", "paper")
+    assert isinstance(get_executor("forex"), PaperExecutor)
+    assert isinstance(get_executor("option"), PaperExecutor)
+
+
+def test_legacy_executor_mode_still_overrides_crypto(monkeypatch):
+    """Back-compat: a non-paper executor_mode keeps selecting the crypto venue."""
+    from execution import _resolve_mode
+    from config import settings as cfg
+    monkeypatch.setattr(cfg, "executor_mode", "coinbase")
+    monkeypatch.setattr(cfg, "crypto_executor", "paper")
+    assert _resolve_mode("crypto") == "coinbase"
+
+
+def test_legacy_executor_mode_paper_defers_to_crypto_executor(monkeypatch):
+    from execution import _resolve_mode
+    from config import settings as cfg
+    monkeypatch.setattr(cfg, "executor_mode", "paper")
+    monkeypatch.setattr(cfg, "crypto_executor", "coinbase")
+    assert _resolve_mode("crypto") == "coinbase"

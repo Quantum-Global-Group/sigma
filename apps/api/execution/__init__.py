@@ -7,10 +7,13 @@ class:
   option → settings.option_executor   (moomoo   | paper)
   forex  → settings.forex_executor    (oanda | mt5 | paper)
 
-The legacy global `settings.executor_mode` still works as a fallback for
-older deploys: if it's set to something other than "paper" it overrides the
-per-asset default. Live ports of each executor are imported lazily so the api
-process doesn't pay their import cost unless the worker actually trades."""
+The legacy global `settings.executor_mode` (pre-dating per-asset settings,
+when crypto was the only live venue) still works as a **crypto-only** fallback:
+if set to something other than "paper" it overrides `crypto_executor`. It never
+affects equity/option/forex — a global override that routed every asset class
+to one venue (e.g. equities to Coinbase) was a misconfiguration hazard. Live
+ports of each executor are imported lazily so the api process doesn't pay
+their import cost unless the worker actually trades."""
 
 from __future__ import annotations
 
@@ -30,11 +33,14 @@ from .base import (
 
 
 def _resolve_mode(asset_class: str) -> str:
-    # Legacy override: executor_mode wins if explicitly non-paper.
-    legacy = (settings.executor_mode or "paper").lower()
-    if legacy not in ("paper", ""):
-        return legacy
     if asset_class == "crypto":
+        # Legacy override, crypto-only: executor_mode predates the per-asset
+        # settings and historically meant "the crypto venue". It must never
+        # leak into other asset classes (EXECUTOR_MODE=coinbase would have
+        # routed equity orders to the Coinbase executor).
+        legacy = (settings.executor_mode or "paper").lower()
+        if legacy not in ("paper", ""):
+            return legacy
         return (settings.crypto_executor or "paper").lower()
     if asset_class == "equity":
         return (settings.equity_executor or "paper").lower()

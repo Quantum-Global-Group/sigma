@@ -152,7 +152,7 @@ async def test_submit_blocks_unapproved_live_order(monkeypatch):
                          order_type=OrderType.MARKET, qty=1.0, limit_px=100.0,
                          time_in_force=TimeInForce.DAY, client_order_id="equity:AAPL:buy:1")
 
-    async def _none(session, coid):
+    async def _none(session, coid, account_id=None):
         return None
     monkeypatch.setattr(tick, "already_submitted", _none)
 

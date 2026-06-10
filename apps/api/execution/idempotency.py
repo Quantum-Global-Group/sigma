@@ -18,11 +18,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Order
 
 
-async def already_submitted(session: AsyncSession, client_order_id: str) -> Optional[Order]:
-    """Return the existing Order for this client_order_id, or None."""
+async def already_submitted(
+    session: AsyncSession, client_order_id: str, account_id=None
+) -> Optional[Order]:
+    """Return the existing Order for this client_order_id, or None.
+
+    The unique index is scoped per account (migration 013): pass `account_id`
+    to check within one account's book — two accounts may legitimately share a
+    client_order_id string for the same logical order. `None` preserves the
+    legacy global check (single house book)."""
     if not client_order_id:
         return None
-    res = await session.execute(
-        select(Order).where(Order.client_order_id == client_order_id)
-    )
+    q = select(Order).where(Order.client_order_id == client_order_id)
+    if account_id is not None:
+        q = q.where(Order.account_id == account_id)
+    res = await session.execute(q)
     return res.scalar_one_or_none()

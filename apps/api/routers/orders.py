@@ -20,6 +20,7 @@ AuthDep = Annotated[AuthContext, Depends(require_auth)]
 
 class OrderOut(BaseModel):
     id: str
+    account_id: Optional[str] = None
     asset_class: str
     symbol: str
     ts: datetime
@@ -37,6 +38,7 @@ class OrderOut(BaseModel):
 async def list_orders(
     auth: AuthDep,
     asset_class: Optional[str] = Query(None, pattern="^(equity|crypto|option|forex)$"),
+    account_id: Optional[str] = Query(None, description="Filter to one trading account (UUID)"),
     symbol: Optional[str] = Query(None, max_length=32),
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -44,6 +46,8 @@ async def list_orders(
     q = select(Order).order_by(Order.ts.desc()).limit(limit)
     if asset_class:
         q = q.where(Order.asset_class == asset_class)
+    if account_id:
+        q = q.where(Order.account_id == account_id)
     if symbol:
         q = q.where(Order.symbol == symbol.upper())
 
@@ -51,6 +55,7 @@ async def list_orders(
     return [
         OrderOut(
             id=str(row.id),
+            account_id=str(row.account_id) if getattr(row, "account_id", None) else None,
             asset_class=row.asset_class,
             symbol=row.symbol,
             ts=row.ts,

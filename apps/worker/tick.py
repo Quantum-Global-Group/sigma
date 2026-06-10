@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -43,6 +44,11 @@ from risk.sizing import PositionSizer
 from universe import get_universe_selector
 
 logger = logging.getLogger(__name__)
+
+# The worker trades exactly one book: the house account (migration 013). All
+# loads filter on it and all inserts attribute to it explicitly, so a future
+# per-customer account's rows are invisible to — and untouched by — this loop.
+_HOUSE_ACCOUNT = uuid.UUID(settings.system_account_id)
 
 # Process-wide kill switch for the standard (equity/crypto/forex) tick — halts
 # new BUY entries when tripped (exits still flow). Mirrors the options worker's
@@ -594,7 +600,10 @@ async def _maybe_exit(
 
 async def _load_open_positions(session: AsyncSession, asset_class: str) -> dict[str, Position]:
     res = await session.execute(
-        select(Position).where(Position.asset_class == asset_class).where(Position.closed.is_(False))
+        select(Position)
+        .where(Position.account_id == _HOUSE_ACCOUNT)
+        .where(Position.asset_class == asset_class)
+        .where(Position.closed.is_(False))
     )
     return {row.symbol: row for row in res.scalars().all()}
 
@@ -619,14 +628,14 @@ async def _ensure_exit_state(session: AsyncSession, position_id, seed_high_water
     res = await session.execute(select(ExitState).where(ExitState.position_id == position_id))
     if res.scalar_one_or_none() is not None:
         return
-    session.add(ExitState(position_id=position_id, high_water_px=seed_high_water))
+    session.add(ExitState(position_id=position_id, account_id=_HOUSE_ACCOUNT, high_water_px=seed_high_water))
 
 
 async def _persist_exit_state(session: AsyncSession, position_id, state: dict) -> None:
     res = await session.execute(select(ExitState).where(ExitState.position_id == position_id))
     es = res.scalar_one_or_none()
     if es is None:
-        es = ExitState(position_id=position_id)
+        es = ExitState(position_id=position_id, account_id=_HOUSE_ACCOUNT)
         session.add(es)
     _apply_state_to_es(es, state)
 
@@ -636,6 +645,7 @@ async def _load_recent_sells(session: AsyncSession, asset_class: str) -> dict[st
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.rebuy_cooldown_min)
     res = await session.execute(
         select(Order.symbol, Order.ts)
+        .where(Order.account_id == _HOUSE_ACCOUNT)
         .where(Order.asset_class == asset_class)
         .where(Order.side == "sell")
         .where(Order.ts >= cutoff)
@@ -820,7 +830,7 @@ async def _submit_and_persist(
     the aggregate fill to the position. Returns (report, affected_position, skip_reason).
     skip_reason is set when the order was not submitted (idempotent | live_blocked)."""
     if intent.client_order_id:
-        existing = await already_submitted(session, intent.client_order_id)
+        existing = await already_submitted(session, intent.client_order_id, account_id=_HOUSE_ACCOUNT)
         if existing is not None:
             logger.info(
                 "[%s] %s idempotent skip (client_order_id=%s)",
@@ -843,6 +853,7 @@ async def _submit_and_persist(
     slippage_bps = next((f.slippage_bps for f in report.fills if f.slippage_bps is not None), None)
 
     session.add(Order(
+        account_id=_HOUSE_ACCOUNT,
         asset_class=intent.asset_class,
         symbol=intent.symbol,
         ts=datetime.now(timezone.utc),
@@ -895,6 +906,7 @@ async def _apply_fill_to_position(
     if side == Side.BUY:
         if existing is None or existing.closed:
             new_pos = Position(
+                account_id=_HOUSE_ACCOUNT,
                 asset_class=asset_class,
                 symbol=symbol,
                 qty=qty,

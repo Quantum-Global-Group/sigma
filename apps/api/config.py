@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # bypass entirely (production must set a value).
     internal_secret: str = ""
     system_user_id: str = "00000000-0000-0000-0000-000000000001"
+    # The worker's house book account (trading_accounts row seeded by migration
+    # 013, broker='house'). All single-book trading attributes to this account
+    # until per-customer accounts are threaded through the worker.
+    system_account_id: str = "00000000-0000-0000-0000-000000000002"
 
     # Sentiment provider selection: finbert | langextract | hybrid | none
     sentiment_provider: str = "finbert"

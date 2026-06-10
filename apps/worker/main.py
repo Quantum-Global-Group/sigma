@@ -74,6 +74,17 @@ async def run_loop(asset_classes: Iterable[str], stop: asyncio.Event) -> None:
         return
     logger.info("singleton lock acquired (%s)", instance_id)
 
+    # Reconcile the persisted book before the first tick: heal missing exit_state
+    # rows + flat-but-open positions, and surface any broker divergences. Never
+    # fatal — a failed reconcile logs (and reaches Sentry) but trading proceeds,
+    # since each tick reloads state from the DB anyway.
+    try:
+        from worker.reconcile import reconcile_startup
+        reconcile_summary = await reconcile_startup(asset_classes)
+        reconcile_summary.log(logger)
+    except Exception:
+        logger.exception("startup reconciliation failed — proceeding to trade loop")
+
     # Self-evolution background jobs run only on the singleton holder, so they
     # never double-run across instances. Optional + best-effort: a scheduler
     # failure must never take down the trading loop.

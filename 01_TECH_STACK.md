@@ -4,6 +4,30 @@
 
 ---
 
+## Tier Progression
+
+```mermaid
+timeline
+  title When each tier earns its place
+  section Tier 1 — Essential
+    Week 1, Day 1 : TypeScript + Python : Next.js + FastAPI : Postgres + Redis : Stripe + Clerk : Vercel + Railway
+  section Tier 2 — Core
+    Week 2–4 : yfinance + pandas-ta : PyTorch + scikit-learn : CVXPY + Qiskit + PennyLane : TimescaleDB : shadcn/ui + Recharts : Sentry + Langfuse + pytest
+  section Tier 3 — Nice to Have
+    Month 2–3 (post first revenue) : FinBERT sentiment : hypothesis : PostHog : Replicate : Upstash
+  section Tier 4 — Pursue Later
+    Month 4+ (scaling) : LangGraph : AWS Lambda : Rust + PyO3 : ChromaDB : Kubernetes
+```
+
+| Tier | Window | Add it when |
+| --- | --- | --- |
+| 1 — Essential | Week 1, Day 1 | Blocks everything else |
+| 2 — Core | Week 2–4 | Skeleton deployed, first endpoint live |
+| 3 — Nice to have | Month 2–3 | Paying users, retention/conversion work |
+| 4 — Pursue later | Month 4+ | Consistent MRR + real scaling pressure |
+
+---
+
 ## Tier 1 — Essential (Week 1, Day 1)
 
 These block everything else. Don't write a line of product code without these in place.

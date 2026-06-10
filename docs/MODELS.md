@@ -3,6 +3,31 @@
 How signals are produced, how models are trained and resolved, and how the
 worker uses them. Reflects the equity-alpha state (post tradeFlux merge).
 
+---
+
+## Lifecycle at a Glance
+
+```mermaid
+flowchart LR
+  subgraph train [Train]
+    D[Unified market adapter: Tiingo → Alpaca → yfinance] --> BF["build_features(df)"]
+    BF --> FIT[scripts/train_models.py] --> ART["{asset}_{type}_{version}.pkl"]
+  end
+  subgraph serve [Serve]
+    ART --> REG["registry.resolve(asset_class)"]
+    REG -->|hit| MODEL[Trained model]
+    REG -->|miss| HEUR[_heuristic_predict]
+  end
+  subgraph worker [Worker tick]
+    MODEL --> MP["_model_pred → {symbol: predicted_return}"]
+    MP --> COMB["combiner.combine_signals(model_predictions=…)"]
+  end
+```
+
+**Resolution order:** equity → `ensemble` → `lstm` → `quantum_hybrid`; crypto → `ranking` → `ensemble`. Trained registry models **always** consume `build_features(df)` — never `FeatureEngineer` output.
+
+---
+
 ## Two feature builders — don't mix them
 
 | Builder | File | Columns | Used by | Roadmap |

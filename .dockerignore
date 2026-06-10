@@ -28,3 +28,9 @@ apps/api/ml/saved_models/*.pkl
 apps/api/ml/saved_models/*.pt
 # Re-include the equity ensemble so the worker image ships it
 !apps/api/ml/saved_models/ensemble_v1.0.pkl
+# Re-include the crypto RankingModel artifact (1.6). train_ranking.py writes
+# crypto_ranking_v1.0.pkl; the legacy registry fallback name is ranking_v1.0.pkl.
+# Without these allows the worker image ships without the crypto model and the
+# registry silently falls back to _heuristic_predict.
+!apps/api/ml/saved_models/crypto_ranking_v1.0.pkl
+!apps/api/ml/saved_models/ranking_v1.0.pkl

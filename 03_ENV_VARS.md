@@ -4,6 +4,35 @@
 
 ---
 
+## Where Each Group Lives
+
+```mermaid
+flowchart LR
+  subgraph webenv ["apps/web/.env.local"]
+    WCLERK[Clerk pk/sk + URLs]
+    WSTRIPE[Stripe pk + webhook + prices]
+    WAPI[NEXT_PUBLIC_API_URL]
+  end
+  subgraph apienv ["apps/api/.env"]
+    ACORE[App + SECRET_KEY]
+    ADATA[DATABASE_URL + REDIS_URL]
+    AAUTH[Clerk sk + JWT]
+    ABILL[Stripe sk + meter]
+    AML[Model dir + quantum + HF]
+    AOBS[Sentry + Langfuse]
+  end
+  WAPI -->|REST| apienv
+  WCLERK -. verifies JWT .-> AAUTH
+  WSTRIPE -. same secret .-> ABILL
+```
+
+| Surface | File | Key groups |
+| --- | --- | --- |
+| Frontend + gateway | `apps/web/.env.local` | Clerk, Stripe (public), backend URL |
+| Backend | `apps/api/.env` | App, DB, Redis, Clerk, Stripe (secret), ML, quantum, observability, rate limits |
+
+---
+
 ## `apps/web/.env.local`
 
 ```env

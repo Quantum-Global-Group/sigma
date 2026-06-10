@@ -8,6 +8,24 @@ the full infra picture (Vercel, Stripe, Clerk, webhooks).
 > **Crypto vs equity:** the general runbook is crypto-first (Coinbase). This doc
 > only changes the worker's asset class, executor, data providers, and secrets.
 
+```mermaid
+flowchart LR
+  P[0. Prereqs: flyctl + keys] --> E[1. Point worker at equities]
+  E --> F[2. Provision Fly apps]
+  F --> I[3. Postgres + Redis]
+  I --> S[4. Secrets]
+  S --> M[5. Migrations 001–007]
+  M --> D[6. Deploy api + worker]
+  D --> V[7. Verify health + orders]
+```
+
+| Layer | Equity choice | Env / secret |
+| --- | --- | --- |
+| Asset class | `equity` | `WORKER_ASSET_CLASSES` |
+| Executor | Alpaca paper | `EQUITY_EXECUTOR=alpaca`, `ALPACA_*` |
+| Data | Tiingo → Alpaca → yfinance | `EQUITY_DATA_PROVIDERS`, `TIINGO_API_KEY` |
+| Model | trained ensemble | `MODEL_DIR=/app/api/ml/saved_models` |
+
 ## 0. Prerequisites
 
 ```bash

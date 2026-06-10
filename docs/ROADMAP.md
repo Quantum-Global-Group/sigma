@@ -34,6 +34,29 @@ Working doc for what's coming next. Single-source-of-truth for milestones, sprin
 
 ---
 
+## Milestone Map
+
+```mermaid
+flowchart LR
+  S0[Sprint 0 — PR #1 close-out] --> M1
+  subgraph M1 [M1 — Internal alpha · paper]
+    direction TB
+    S1[Sprint 1 — Deploy + first model] --> S2[Sprint 2 — Observability]
+    S2 --> S3[Sprint 3 — Stability + risk knobs]
+    S3 --> S4[Sprint 4 — Alpha review + go/no-go]
+  end
+  M1 --> M2[M2 — Beta · multi-tenant paper]
+  M2 --> M3[M3 — Production · sandbox → live]
+```
+
+| Milestone | Posture | Gate to next |
+| --- | --- | --- |
+| M1 — Internal alpha | House book, paper, Fly.io | 2+ weeks unattended + trained ensemble live |
+| M2 — Beta | Multi-tenant, paper, crypto exposed | 4 weeks clean metered traffic |
+| M3 — Production | Sandbox → live, capped notional | DR runbook + 2-week order roundtrip |
+
+---
+
 ## Milestones
 
 ### M1 — Internal alpha (paper) · target: 8 weeks from PR #1 merge

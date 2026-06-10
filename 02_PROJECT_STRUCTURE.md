@@ -5,6 +5,49 @@
 
 ---
 
+## Package Boundaries
+
+```mermaid
+flowchart TB
+  subgraph web [apps/web — Next.js + gateway]
+    UI[App routes + components]
+    GW[Vercel functions — webhooks, auth]
+  end
+  subgraph api [apps/api — FastAPI]
+    R[routers]
+    ML[ml + quantum]
+    DB[db + cache]
+    BILL[billing + middleware]
+  end
+  subgraph pkg [packages]
+    TYPES["types (@sigma/types)"]
+    MIG[db migrations + schema]
+  end
+  UI --> GW
+  GW -->|REST| R
+  R --> ML
+  R --> DB
+  R --> BILL
+  DB --> MIG
+  UI -.shared types.-> TYPES
+  GW -.shared types.-> TYPES
+```
+
+---
+
+## Build Order at a Glance
+
+```mermaid
+timeline
+  title 4-week build order
+  Week 1 — Skeleton : Repo + Docker + Makefile : FastAPI /health + /signals : DB migration 001 : Web landing + auth
+  Week 2 — Auth, billing, dashboard : API keys + usage + Stripe : Migrations 002–003 : Dashboard shell + signal explorer
+  Week 3 — Portfolio + quantum : /portfolio + /backtest : quantum optimizer + circuits : Migration 004 : Portfolio UI
+  Week 4 — Docs, polish, launch : Docs pages : Footer + feature grid
+```
+
+---
+
 ## Repository Layout
 
 ```

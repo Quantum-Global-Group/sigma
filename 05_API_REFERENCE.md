@@ -5,6 +5,39 @@
 
 ---
 
+## Endpoint Map
+
+```mermaid
+flowchart LR
+  K[Bearer key] --> AUTH{Validate + rate limit}
+  AUTH -->|reject| E429[429 / 401]
+  AUTH -->|pass| ROUTES
+  subgraph ROUTES [Endpoints]
+    direction TB
+    H[GET /health · /ready]
+    S[POST /signals]
+    SH[GET /signals/:ticker/history]
+    P[POST /portfolio/rebalance]
+    B[POST /backtest/run]
+    KEYS[GET·POST·DELETE /keys]
+    U[GET /usage]
+  end
+  S --> CACHE{cache hit?}
+  CACHE -->|yes| RESP[signal — no charge]
+  CACHE -->|no| ML[ML pipeline] --> RESP
+```
+
+| Group | Endpoints | Auth |
+| --- | --- | --- |
+| Health | `GET /health`, `GET /ready` | none |
+| Signals | `POST /signals`, `GET /signals/{ticker}/history` | Bearer |
+| Portfolio | `POST /portfolio/rebalance` | Bearer |
+| Backtest | `POST /backtest/run` | Bearer |
+| Keys | `GET/POST/DELETE /keys` | Bearer |
+| Usage | `GET /usage` | Bearer |
+
+---
+
 ## Authentication
 
 ```http

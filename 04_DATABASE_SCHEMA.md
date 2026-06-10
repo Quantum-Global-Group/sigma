@@ -5,6 +5,79 @@
 
 ---
 
+## Entity Relationships
+
+```mermaid
+erDiagram
+  users ||--o{ api_keys : owns
+  users ||--o{ usage_logs : generates
+  users ||--o{ signal_history : requests
+  users ||--o{ billing_summaries : accrues
+  users ||--o{ portfolio_snapshots : holds
+  api_keys ||--o{ usage_logs : authorizes
+  users {
+    uuid id PK
+    varchar clerk_id
+    varchar plan
+    varchar stripe_customer_id
+  }
+  api_keys {
+    uuid id PK
+    uuid user_id FK
+    varchar key_hash
+    varchar key_prefix
+    boolean revoked
+  }
+  usage_logs {
+    bigserial id PK
+    uuid user_id FK
+    varchar endpoint
+    smallint status_code
+  }
+  signal_history {
+    bigserial id PK
+    uuid user_id FK
+    varchar ticker
+    varchar signal
+    numeric confidence
+  }
+  signal_cache {
+    varchar ticker PK
+    varchar timeframe PK
+    timestamptz expires_at
+  }
+  billing_summaries {
+    bigserial id PK
+    uuid user_id FK
+    date period_start
+    integer amount_cents
+  }
+  stripe_events {
+    varchar stripe_event_id PK
+    varchar event_type
+    boolean processed
+  }
+  portfolio_snapshots {
+    bigserial id PK
+    uuid user_id FK
+    jsonb holdings
+    numeric sharpe_ratio
+  }
+```
+
+> `signal_history` and `portfolio_snapshots` are TimescaleDB hypertables (partitioned by `created_at`). `signal_cache` and `stripe_events` stand alone — keyed by business identity, not `user_id`.
+
+### Migration map
+
+| Migration | Tables added |
+| --- | --- |
+| 001 | `users`, `api_keys`, `usage_logs` |
+| 002 | `signal_history` (hypertable), `signal_cache` |
+| 003 | `stripe_events`, `billing_summaries` |
+| 004 | `portfolio_snapshots` (hypertable) |
+
+---
+
 ## Migration 001 — Initial Schema
 
 ```sql

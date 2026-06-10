@@ -51,8 +51,26 @@ def _resolve_mode(asset_class: str) -> str:
     return "paper"
 
 
-def get_executor(asset_class: str = "crypto") -> Executor:
-    mode = _resolve_mode(asset_class)
+def resolve_account_mode(account) -> str | None:
+    """Executor mode for a TradingAccount row, or None for legacy resolution.
+
+    `broker='house'` (the migration-013 sentinel for the worker's own book) and
+    `account=None` both mean "use the per-asset-class env settings" — exactly
+    the pre-multi-account behavior. Real accounts map `broker` directly to an
+    executor mode. NOTE: per-account credentials are deferred to the vault work
+    (Tier 3.3); executors still read the global broker env, so two accounts on
+    the same broker share credentials for now — their DB books stay isolated
+    via account_id, but broker-side independence is not yet real."""
+    if account is None:
+        return None
+    broker = (getattr(account, "broker", "") or "").lower()
+    if broker in ("", "house"):
+        return None
+    return broker
+
+
+def get_executor(asset_class: str = "crypto", account=None) -> Executor:
+    mode = resolve_account_mode(account) or _resolve_mode(asset_class)
     if mode == "paper":
         from .paper import PaperExecutor
         return PaperExecutor()
@@ -85,4 +103,5 @@ __all__ = [
     "Side",
     "TimeInForce",
     "get_executor",
+    "resolve_account_mode",
 ]

@@ -1,12 +1,22 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from db.connection import Base
+
+
+def _house_account_id() -> uuid.UUID:
+    """Default account for rows written before multi-account threading exists.
+
+    Matches migration 013's seeded house account and column defaults, so ORM
+    inserts and raw-SQL inserts agree on where unattributed rows land."""
+    from config import settings
+
+    return uuid.UUID(settings.system_account_id)
 
 
 class User(Base):
@@ -176,10 +186,36 @@ class Candle(Base):
     source: Mapped[str | None] = mapped_column(String(32))
 
 
+class TradingAccount(Base):
+    """One (user, broker) trading relationship — migration 013.
+
+    `broker='house'` is the sentinel for the worker's own book: the executor
+    factory maps it back to the legacy per-asset-class env resolution. Real
+    accounts map `broker` directly to an executor. Per-account credentials are
+    deferred to the vault work (Tier 3.3); until then all accounts share the
+    global broker env, so DB books are isolated but broker-side independence
+    is not yet real."""
+
+    __tablename__ = "trading_accounts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    broker: Mapped[str] = mapped_column(String(32), nullable=False)   # house | paper | alpaca | coinbase | moomoo
+    label: Mapped[str | None] = mapped_column(String(100))
+    paper: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    enabled_asset_classes: Mapped[str] = mapped_column(String(64), nullable=False, default="crypto,equity")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")  # active | paused | disabled
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Position(Base):
     __tablename__ = "positions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("trading_accounts.id"), nullable=False, default=_house_account_id,
+    )
     asset_class: Mapped[str] = mapped_column(String(16), nullable=False)
     symbol: Mapped[str] = mapped_column(String(32), nullable=False)
     qty: Mapped[float] = mapped_column(Numeric(28, 8), nullable=False)
@@ -202,8 +238,14 @@ class Position(Base):
 
 class Order(Base):
     __tablename__ = "orders"
+    # Idempotency is scoped per account (migration 013): two accounts may share
+    # a client_order_id string for the same logical order without colliding.
+    __table_args__ = (UniqueConstraint("account_id", "client_order_id", name="uq_orders_account_client_order_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("trading_accounts.id"), nullable=False, default=_house_account_id,
+    )
     asset_class: Mapped[str] = mapped_column(String(16), nullable=False)
     symbol: Mapped[str] = mapped_column(String(32), nullable=False)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -214,7 +256,7 @@ class Order(Base):
     slippage_bps: Mapped[float | None] = mapped_column(Numeric(10, 4))
     executor: Mapped[str] = mapped_column(String(32), nullable=False)
     external_id: Mapped[str | None] = mapped_column(String(128))
-    client_order_id: Mapped[str | None] = mapped_column(String(64), unique=True)
+    client_order_id: Mapped[str | None] = mapped_column(String(64))
     order_type: Mapped[str] = mapped_column(String(16), nullable=False, default="market")
     time_in_force: Mapped[str] = mapped_column(String(8), nullable=False, default="day")
     limit_px: Mapped[float | None] = mapped_column(Numeric(20, 8))
@@ -234,6 +276,9 @@ class ExitState(Base):
     __tablename__ = "exit_state"
 
     position_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("positions.id", ondelete="CASCADE"), primary_key=True)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("trading_accounts.id"), nullable=False, default=_house_account_id,
+    )
     partial_tp_done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     breakeven_px: Mapped[float | None] = mapped_column(Numeric(20, 8))
     trailing_stop_px: Mapped[float | None] = mapped_column(Numeric(20, 8))

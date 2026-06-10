@@ -54,14 +54,17 @@ def _defaults_for(asset_class: str) -> tuple[list[str], str]:
 
 def build_training_set(
     symbols: list[str], asset_class: str, timeframe: str, threshold: float = 0.005,
-) -> tuple[pd.DataFrame, np.ndarray]:
+) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
     """Combine features + labels across symbols into a single training set.
 
     Pulls bars via the same MarketAdapter the worker trades on, so training and
-    serving share the exact data path."""
+    serving share the exact data path. Returns (X, labels, future_returns) —
+    the realized next-bar returns are kept alongside the class labels so the
+    train gate can measure rank-IC on the validation tail."""
     adapter = get_market_adapter(asset_class)
     X_parts: list[pd.DataFrame] = []
     y_parts: list[np.ndarray] = []
+    r_parts: list[np.ndarray] = []
 
     for symbol in symbols:
         try:
@@ -79,9 +82,11 @@ def build_training_set(
 
         features = features.iloc[:-1]   # drop last row — no future return
         labels = labels[:-1]
+        returns = future_return.to_numpy(dtype=float)[:-1]
 
         X_parts.append(features)
         y_parts.append(labels)
+        r_parts.append(returns)
         logger.info("Loaded %d samples for %s", len(features), symbol)
 
     if not X_parts:
@@ -89,8 +94,9 @@ def build_training_set(
 
     X = pd.concat(X_parts, ignore_index=True)
     y = np.concatenate(y_parts)
+    r = np.concatenate(r_parts)
     logger.info("Total training set: %d samples, %d features", len(X), X.shape[1])
-    return X, y
+    return X, y, r
 
 
 def _artifact_path(asset_class: str, model_type: str, version: str, ext: str) -> str:
@@ -105,15 +111,18 @@ def _class_balance(y: np.ndarray) -> dict:
     return {f"class_{names.get(int(v), v)}_frac": round(int(c) / total, 4) for v, c in zip(vals, counts)}
 
 
-def _split(X: pd.DataFrame, y: np.ndarray, val_frac: float = 0.2):
+def _split(X: pd.DataFrame, y: np.ndarray, returns: np.ndarray, val_frac: float = 0.2):
     """Chronological (walk-forward) holdout — NO shuffle.
 
     A random/stratified split leaks adjacent bars (bar t in train, t+1 in val)
     so the model memorizes and posts implausible accuracy (e.g. 0.99). Training
     on the earlier rows and validating on the most-recent tail gives an honest
-    out-of-sample estimate that reflects how the model will actually trade."""
+    out-of-sample estimate that reflects how the model will actually trade.
+
+    Returns (X_tr, X_val, y_tr, y_val, r_tr, r_val) — realized returns ride
+    along so the gate can score rank-IC on the same validation tail."""
     from sklearn.model_selection import train_test_split
-    return train_test_split(X, y, test_size=val_frac, shuffle=False)
+    return train_test_split(X, y, returns, test_size=val_frac, shuffle=False)
 
 
 def _write_model_card(path_no_ext: str, card: dict) -> str:
@@ -143,13 +152,20 @@ def _base_card(asset_class, model_type, version, symbols, timeframe, threshold, 
     return card
 
 
-def train_ensemble(X, y, *, asset_class, version, symbols, timeframe, threshold) -> str:
+def train_ensemble(X, y, returns, *, asset_class, version, symbols, timeframe, threshold,
+                   force: bool = False) -> str | None:
+    """Train the soft-vote ensemble; write the artifact only if the gate passes.
+
+    Returns the artifact path, or None when the gate refused (and `force` is
+    off). A refused run still writes the model card and MLflow record — the
+    verdict is the evidence — but no .pkl reaches the registry."""
     from sklearn.metrics import accuracy_score
 
     from ml.models.ensemble import EnsembleSignalModel
+    from ml.train_gate import evaluate_train_gate
 
     out_path = _artifact_path(asset_class, "ensemble", version, "pkl")
-    X_tr, X_val, y_tr, y_val = _split(X, y)
+    X_tr, X_val, y_tr, y_val, _r_tr, r_val = _split(X, y, returns)
 
     model = EnsembleSignalModel()
     model.train(X_tr, y_tr)
@@ -157,31 +173,56 @@ def train_ensemble(X, y, *, asset_class, version, symbols, timeframe, threshold)
     # Batch validation accuracy via the ensemble's soft vote (rf + xgb).
     rf_p = model.rf.predict_proba(X_val.values)
     xgb_p = model.xgb.predict_proba(X_val.values)
-    val_pred = np.argmax((rf_p + xgb_p) / 2.0, axis=1)
+    avg_p = (rf_p + xgb_p) / 2.0
+    val_pred = np.argmax(avg_p, axis=1)
     val_acc = float(accuracy_score(y_val, val_pred))
     train_pred = np.argmax(
         (model.rf.predict_proba(X_tr.values) + model.xgb.predict_proba(X_tr.values)) / 2.0, axis=1
     )
     train_acc = float(accuracy_score(y_tr, train_pred))
 
-    model.save(out_path)
-    logger.info("Saved ensemble → %s (val_acc=%.3f)", out_path, val_acc)
+    # Gate on the validation tail: accuracy must beat always-predict-majority,
+    # and the directional score (p_buy - p_sell) must rank-correlate positively
+    # with realized next-bar returns.
+    val_scores = avg_p[:, 2] - avg_p[:, 0]
+    gate = evaluate_train_gate(y_val, val_pred, val_scores, r_val)
+
+    saved = gate.passed or force
+    if saved:
+        model.save(out_path)
+        if gate.passed:
+            logger.info("Saved ensemble → %s (val_acc=%.3f, rank_ic=%s)",
+                        out_path, val_acc, gate.rank_ic)
+        else:
+            logger.warning("GATE FAILED but --force given — saving %s anyway: %s",
+                           out_path, "; ".join(gate.reasons))
+    else:
+        logger.error("GATE FAILED — artifact NOT written (%s): %s",
+                     out_path, "; ".join(gate.reasons))
 
     metrics = {"train_accuracy": train_acc, "val_accuracy": val_acc,
+               "majority_baseline": gate.majority_baseline,
+               "rank_ic": gate.rank_ic,  # None when undefined — card keeps the null
+               "gate_passed": int(gate.passed),
                "n_train": len(X_tr), "n_val": len(X_val)}
     card = _base_card(asset_class, "ensemble", version, symbols, timeframe, threshold, X,
-                      y, extra={"metrics": metrics, "artifact": out_path})
+                      y, extra={"metrics": metrics, "gate": gate.as_dict(),
+                                "gate_forced": bool(force and not gate.passed),
+                                "artifact": out_path if saved else None})
     card_path = _write_model_card(out_path[:-4], card)
 
     with start_run(f"ensemble-{asset_class}-{version}",
-                   tags={"asset_class": asset_class, "model_type": "ensemble"}) as run:
+                   tags={"asset_class": asset_class, "model_type": "ensemble",
+                         "gate": "passed" if gate.passed else ("forced" if force else "refused")}) as run:
         run.log_params({"asset_class": asset_class, "model_type": "ensemble", "version": version,
                         "symbols": ",".join(symbols), "timeframe": timeframe, "threshold": threshold,
                         "n_samples": len(X), "n_features": X.shape[1]})
-        run.log_metrics({**metrics, **_class_balance(y)})
-        run.log_artifact(out_path)
+        numeric = {k: v for k, v in metrics.items() if v is not None}
+        run.log_metrics({**numeric, **_class_balance(y)})
+        if saved:
+            run.log_artifact(out_path)
         run.log_artifact(card_path)
-    return out_path
+    return out_path if saved else None
 
 
 def train_lstm(X, y, *, asset_class, version, symbols, timeframe, threshold) -> str:
@@ -355,6 +396,10 @@ def main():
     parser.add_argument("--threshold", type=float, default=None,
                         help="Label threshold for BUY/SELL (default: per-asset from settings: "
                              "equity=0.005, forex=0.001, crypto=0.005)")
+    parser.add_argument("--force", action="store_true",
+                        help="Write the artifact even when the train gate fails "
+                             "(val accuracy <= majority baseline, or rank-IC <= 0). "
+                             "The gate verdict is still recorded in the model card + MLflow.")
     args = parser.parse_args()
 
     if not (args.ensemble or args.lstm or args.quantum_hybrid or args.all or args.meta):
@@ -377,12 +422,16 @@ def main():
                 args.asset_class, args.version, symbols, timeframe, threshold)
 
     # Fixed-threshold training set is only needed for the price-model heads.
+    refused = False
     if args.all or args.ensemble or args.lstm or args.quantum_hybrid:
-        X, y = build_training_set(symbols, args.asset_class, timeframe, threshold=threshold)
+        X, y, returns = build_training_set(symbols, args.asset_class, timeframe, threshold=threshold)
         kw = dict(asset_class=args.asset_class, version=args.version, symbols=symbols,
                   timeframe=timeframe, threshold=threshold)
         if args.all or args.ensemble:
-            train_ensemble(X, y, **kw)
+            saved = train_ensemble(X, y, returns, force=args.force, **kw)
+            refused = refused or saved is None
+        # LSTM / quantum-hybrid are ungated research heads — they only serve when
+        # the gated ensemble is absent, and they don't compute val metrics yet.
         if args.all or args.lstm:
             train_lstm(X, y, **kw)
         if args.all or args.quantum_hybrid:
@@ -391,6 +440,11 @@ def main():
     if args.all or args.meta:
         train_meta(asset_class=args.asset_class, version=args.version,
                    symbols=symbols, timeframe=timeframe)
+
+    if refused:
+        logger.error("One or more models failed the train gate — no artifact written. "
+                     "Inspect the model card / MLflow run; use --force to override.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

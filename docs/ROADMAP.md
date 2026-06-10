@@ -63,7 +63,7 @@ flowchart LR
 
 Success criteria:
 - Worker runs on **Fly.io** for 2+ consecutive weeks without manual intervention
-- Trained **equity `ensemble_v1.0.pkl`** artifact in production, not the heuristic fallback (crypto `ranking` follows once the equity loop is observed)
+- ~~Trained equity ensemble in production~~ **revised 2026-06-10:** the train gate measured the equity ensemble edgeless (val 0.348 < majority 0.377; train 0.90 = overfit) and the artifact was pulled — equity runs the **technical-only blend** for the observation window. Crypto runs the trained `crypto_ranking_v1.0.pkl`. A new equity model ships only by passing the gate.
 - Daily signal log + **weekly strategy review** habit established (`/strategies` or performance report API)
 - **Audit trail** queryable per tick (`audit_records` for equity/crypto/forex/options)
 - Sentry shows ≤1 unique exception per week (worker Sentry wired)

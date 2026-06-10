@@ -53,8 +53,12 @@ Artifact path: `{MODEL_DIR}/{asset_class}_{model_type}_{version}.{pkl|pt}`, with
 legacy fallback `{MODEL_DIR}/{model_type}_{version}.{ext}`. `MODEL_DIR` defaults
 to `./ml/saved_models`; `version` defaults to `settings.model_version` (`v1.0`).
 
-> The equity ensemble currently ships as `ensemble_v1.0.pkl` (legacy name) and
-> loads via the fallback path. `equity_ensemble_v1.0.pkl` would also work.
+> **No equity model currently ships.** The legacy `ensemble_v1.0.pkl` was pulled
+> on 2026-06-10 after the train gate (`ml/train_gate.py`) measured it edgeless —
+> val_accuracy 0.348 vs majority baseline 0.377 with train_accuracy 0.90 (pure
+> overfit). The registry resolves equity → None and the worker trades the
+> technical-only blend. A replacement ships as `equity_ensemble_{version}.pkl`
+> only when `train_models.py --ensemble` passes the gate.
 
 ## Training
 

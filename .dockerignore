@@ -26,8 +26,10 @@ docker-compose.override.yml
 # Saved models — bundle separately when training pipeline matures
 apps/api/ml/saved_models/*.pkl
 apps/api/ml/saved_models/*.pt
-# Re-include the equity ensemble so the worker image ships it
-!apps/api/ml/saved_models/ensemble_v1.0.pkl
+# Equity ensemble pulled 2026-06-10: the train gate measured it edgeless
+# (val_acc 0.348 < majority 0.377, train_acc 0.90 = overfit). Equity trades the
+# technical-only blend until a model passes the gate; re-add the allow line
+# (equity_ensemble_*.pkl) when one does.
 # Re-include the crypto RankingModel artifact (1.6). train_ranking.py writes
 # crypto_ranking_v1.0.pkl; the legacy registry fallback name is ranking_v1.0.pkl.
 # Without these allows the worker image ships without the crypto model and the

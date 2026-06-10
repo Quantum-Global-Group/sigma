@@ -201,8 +201,19 @@ def build_default_combiner(asset_class: Optional[str] = None) -> StrategyCombine
     return StrategyCombiner(strategies, weights)
 
 
-def combine_to_result(combined: Signal, *, model_version: str = "combined-v1") -> SignalResult:
-    """Translate a combiner Signal into sigma's SignalResult contract."""
+def combine_to_result(
+    combined: Signal,
+    *,
+    model_version: str = "combined-v1",
+    expected_move: Optional[float] = None,
+) -> SignalResult:
+    """Translate a combiner Signal into sigma's SignalResult contract.
+
+    `expected_move` scales strength into a predicted return in the asset's own
+    units — callers with a feature frame pass the current ATR/close (see
+    worker.tick). Without it, the legacy 5% scale applies, which is an
+    arbitrary magnitude: fine for signal *direction* consumers, wrong for
+    anything that treats predicted_return as an edge estimate."""
     threshold = 0.1  # razorBill's should_trade lower bound
     if combined.strength > threshold:
         signal = "BUY"
@@ -218,10 +229,11 @@ def combine_to_result(combined: Signal, *, model_version: str = "combined-v1") -
     }
     component_weights.update(combined.metadata or {})
 
+    move = expected_move if expected_move and expected_move > 0 else 0.05
     result = SignalResult(
         signal=signal,
         confidence=float(np.clip(combined.confidence, 0.0, 1.0)),
-        predicted_return=float(combined.strength * 0.05),  # rough scaling
+        predicted_return=float(combined.strength * move),
         component_weights=component_weights,
     )
     result.model_version = model_version

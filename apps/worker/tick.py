@@ -320,7 +320,11 @@ async def _process_symbol(
             min_agreement=min_agreement,
             vote_threshold=vote_threshold,
         )
-        result = combine_to_result(combined, model_version=model_version)
+        result = combine_to_result(
+            combined,
+            model_version=model_version,
+            expected_move=_expected_move(feats, px_now),
+        )
         # Meta-labeling gate (measured win on crypto): a secondary model scores
         # P(win) of taking the combiner side; below tau → HOLD, else confidence
         # becomes P(win). No-op unless the asset is configured AND an artifact loads.
@@ -930,6 +934,20 @@ def _client_order_id(asset_class: str, symbol: str, tag: str, signal_ts) -> str:
     one order, but a new bar (new signal_ts) yields a new key."""
     bucket = int(pd.Timestamp(signal_ts).timestamp()) if signal_ts is not None else 0
     return f"{asset_class}:{symbol}:{tag}:{bucket}"
+
+
+def _expected_move(feats: pd.DataFrame, px_now: float) -> Optional[float]:
+    """Current ATR as a fraction of price — the per-bar move scale that turns
+    blended signal strength into a predicted return in the asset's own units.
+    None when ATR is unavailable; combine_to_result then falls back to its
+    legacy fixed scale."""
+    try:
+        atr = float(feats["atr"].iloc[-1])
+        if atr > 0 and px_now > 0:
+            return atr / px_now
+    except Exception:
+        pass
+    return None
 
 
 def _last_bar_ts(feats: pd.DataFrame):

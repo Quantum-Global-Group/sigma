@@ -165,7 +165,7 @@ def train_ensemble(X, y, returns, *, asset_class, version, symbols, timeframe, t
     from ml.train_gate import evaluate_train_gate
 
     out_path = _artifact_path(asset_class, "ensemble", version, "pkl")
-    X_tr, X_val, y_tr, y_val, _r_tr, r_val = _split(X, y, returns)
+    X_tr, X_val, y_tr, y_val, r_tr, r_val = _split(X, y, returns)
 
     model = EnsembleSignalModel()
     model.train(X_tr, y_tr)
@@ -186,6 +186,13 @@ def train_ensemble(X, y, returns, *, asset_class, version, symbols, timeframe, t
     # with realized next-bar returns.
     val_scores = avg_p[:, 2] - avg_p[:, 0]
     gate = evaluate_train_gate(y_val, val_pred, val_scores, r_val)
+
+    # Post-fit enrichments, persisted inside the artifact: isotonic confidence
+    # calibration on the held-out fold (monotonic — doesn't change argmax, so
+    # the gate verdict above is unaffected) and the measured expected per-bar
+    # move from the training fold (replaces the legacy hardcoded 5% scale).
+    calibrated = model.fit_calibration(X_val, y_val)
+    model.fit_expected_move(r_tr, y_tr)
 
     saved = gate.passed or force
     if saved:
@@ -208,6 +215,8 @@ def train_ensemble(X, y, returns, *, asset_class, version, symbols, timeframe, t
     card = _base_card(asset_class, "ensemble", version, symbols, timeframe, threshold, X,
                       y, extra={"metrics": metrics, "gate": gate.as_dict(),
                                 "gate_forced": bool(force and not gate.passed),
+                                "calibrated": bool(calibrated),
+                                "expected_move": model.expected_move,
                                 "artifact": out_path if saved else None})
     card_path = _write_model_card(out_path[:-4], card)
 

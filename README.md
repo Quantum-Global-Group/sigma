@@ -16,9 +16,11 @@ Built for engineers. No sales calls. No minimums. Pay per call.
 (2026-06) are shipped; what remains is **operational** — Fly deploy, migrations
 001–013 on prod, 2+ weeks paper observation, weekly strategy review, then M2 decision.
 
-**Alpha focus:** equity-first on Alpaca paper, with the trained `ensemble_v1.0.pkl`
-wired into the worker (not the heuristic fallback). Crypto ranking model follows
-once the equity loop is observed.
+**Alpha focus:** equity-first on Alpaca paper, trading the **technical-only
+blend** — the legacy equity ensemble was pulled after the train gate measured it
+edgeless (val_acc 0.348 vs majority baseline 0.377; train_acc 0.90 = overfit).
+A new equity model ships only when it passes the gate. Crypto runs the trained
+RankingModel (`crypto_ranking_v1.0.pkl`).
 
 | Area | State |
 |---|---|
@@ -518,7 +520,7 @@ flowchart LR
 - [x] Portfolio rebalancer (CVXPY + QAOA) + strategy backtesting engine
 - [x] **razorBill + tradeFlux merge** — crypto signals, multi-strategy combiner, Alpaca equity execution, advanced exits, dynamic universe
 - [x] **Live worker loop** — paper executor, venue adapters (Coinbase, Alpaca, OANDA, Moomoo), ExitState persistence, rebuy cooldown, startup book reconciliation
-- [x] **Trained equity ensemble** wired into worker (`ensemble_v1.0.pkl` baked into image)
+- [x] **Trained crypto RankingModel** baked into the worker image (`crypto_ranking_v1.0.pkl`); equity ensemble **pulled** after the train gate measured it edgeless — equity trades the technical blend until a model passes
 - [x] **Self-evolution loop** — decision logging + outcome labeling (009), evaluate → human-gated promotion → champion (010), worker scheduler
 - [x] **Alpha research foundation** — purged CV (`ml/cv.py`), triple-barrier labels, crypto meta-labeling, cost-aware net-edge gate
 - [x] **Observability + ops** — worker Sentry, `/health/worker`, executor retry/backoff, Redis singleton lock, CI workflow

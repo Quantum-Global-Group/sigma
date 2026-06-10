@@ -75,7 +75,7 @@ fly scale count 0 -a sigma-worker
 Pause stops **new** worker-driven orders. Live executors also require explicit flags and approval:
 
 1. `POST /execution/revoke_live` (internal secret) — clears session live approval.
-2. Set executor env to paper / sandbox (`EXECUTOR_MODE`, `COINBASE_SANDBOX`, Alpaca paper keys) via `fly secrets` and redeploy if needed.
+2. Set executor env to paper / sandbox (`CRYPTO_EXECUTOR` / `EQUITY_EXECUTOR` / etc., `COINBASE_SANDBOX`, Alpaca paper keys) via `fly secrets` and redeploy if needed.
 3. See [`docs/GO_LIVE.md`](./GO_LIVE.md) for the full gate checklist.
 
 ---

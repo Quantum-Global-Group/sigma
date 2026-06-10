@@ -81,7 +81,7 @@ Success criteria:
 ### M3 — Production (sandbox → live) · target: when M2 has 4+ weeks of clean traffic
 
 Success criteria:
-- `EXECUTOR_MODE=coinbase` with sandbox keys, full order roundtrip captured in `orders` table for 2 weeks
+- `CRYPTO_EXECUTOR=coinbase` with sandbox keys, full order roundtrip captured in `orders` table for 2 weeks
 - Switch to live keys with a hard cap on per-day notional
 - DR runbook (`DEPLOY.md` updated): how to stop the worker, reconcile open positions, restart
 - Real-money trading on the house book, no customer-facing live execution

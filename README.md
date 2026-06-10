@@ -465,9 +465,12 @@ REDIS_URL=redis://localhost:6379
 
 # Worker / live trading (only needed when running apps/worker)
 INTERNAL_SECRET=change-me              # Worker uses this to call /signals
-EXECUTOR_MODE=paper                    # paper | coinbase
 WORKER_ASSET_CLASSES=equity            # comma-separated: crypto,equity,forex,option
-COINBASE_API_KEY_NAME=                 # required when EXECUTOR_MODE=coinbase
+CRYPTO_EXECUTOR=paper                  # paper | coinbase
+EQUITY_EXECUTOR=paper                  # paper | alpaca
+FOREX_EXECUTOR=paper                   # paper | oanda | mt5
+OPTION_EXECUTOR=paper                  # paper | moomoo
+COINBASE_API_KEY_NAME=                 # required when CRYPTO_EXECUTOR=coinbase
 COINBASE_PRIVATE_KEY=
 COINBASE_SANDBOX=true
 

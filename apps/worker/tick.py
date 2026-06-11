@@ -123,6 +123,19 @@ async def tick_once(asset_class: str, equity: Optional[float] = None) -> None:
     audit_log = AuditLog()
 
     async with AsyncSessionLocal() as session:
+        # Pull the broker's fill truth BEFORE loading the book: a DAY order
+        # that filled after place()'s poll timeout keeps working at the broker,
+        # and without this the DB position under-counts what the account holds.
+        # Non-fatal — a broker hiccup means "reconciled next tick", not a dead tick.
+        try:
+            from worker.fill_reconcile import reconcile_fills
+            fill_summary = await reconcile_fills(
+                session, asset_class=asset_class, executor=executor, account_id=_HOUSE_ACCOUNT,
+            )
+            fill_summary.log(logger)
+        except Exception:
+            logger.exception("[%s] fill reconciliation failed — continuing tick", asset_class)
+
         # Resolve the active (human-approved champion) model + its version so
         # signal_history is tagged with the version that produced it — the join
         # the self-evolution loop later evaluates.

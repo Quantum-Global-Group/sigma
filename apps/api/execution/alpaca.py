@@ -21,6 +21,7 @@ from typing import Optional
 from config import settings
 
 from .base import (
+    BrokerOrderView,
     Executor,
     ExecutionReport,
     Fill,
@@ -137,6 +138,56 @@ class AlpacaExecutor(Executor):
                 except (TypeError, ValueError):
                     continue
         return None
+
+    async def get_broker_positions(self) -> Optional[dict[str, float]]:
+        """Alpaca's actual open positions as {symbol: signed_qty}, or None.
+
+        Feeds the startup reconciler's broker cross-check: None means
+        "unavailable, skip the check"; an empty dict means the account is
+        genuinely flat and DB-open positions WILL be flagged as divergent."""
+        loop = asyncio.get_event_loop()
+        try:
+            positions = await loop.run_in_executor(None, self._client.get_all_positions)
+        except Exception:
+            logger.exception("[alpaca] get_all_positions failed")
+            return None
+        out: dict[str, float] = {}
+        for p in positions or []:
+            try:
+                qty = float(getattr(p, "qty", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if "short" in str(getattr(p, "side", "long")).lower():
+                qty = -abs(qty)
+            symbol = str(getattr(p, "symbol", "") or "").upper()
+            if symbol:
+                out[symbol] = qty
+        return out
+
+    async def get_order_status(self, external_id: str) -> Optional[BrokerOrderView]:
+        """Alpaca's current view of one order, for partial-fill reconciliation.
+
+        None on query failure (caller skips — never guesses). filled_qty is
+        cumulative, so the reconciler can diff it against the qty the worker
+        recorded at place() time."""
+        loop = asyncio.get_event_loop()
+        try:
+            o = await loop.run_in_executor(None, lambda: self._client.get_order_by_id(external_id))
+        except Exception:
+            logger.exception("[alpaca] get_order_by_id failed for %s", external_id)
+            return None
+        try:
+            filled_qty = float(getattr(o, "filled_qty", 0) or 0)
+        except (TypeError, ValueError):
+            filled_qty = 0.0
+        try:
+            raw_px = getattr(o, "filled_avg_price", None)
+            avg_price = float(raw_px) if raw_px not in (None, "", 0, "0") else None
+        except (TypeError, ValueError):
+            avg_price = None
+        # Alpaca enums stringify like "OrderStatus.PARTIALLY_FILLED" — keep the tail.
+        status = str(getattr(o, "status", "")).lower().split(".")[-1]
+        return BrokerOrderView(filled_qty=filled_qty, avg_price=avg_price, status=status)
 
     # ---- internal -------------------------------------------------------
 

@@ -129,6 +129,19 @@ class ExecutionReport:
         return self.order.avg_fill_price
 
 
+@dataclass(frozen=True)
+class BrokerOrderView:
+    """A broker's current view of one order — the truth the book reconciles to.
+
+    `filled_qty` is cumulative. `avg_price` is the cumulative average fill
+    price (None when nothing filled). `status` is normalized lowercase
+    (e.g. "filled", "partially_filled", "canceled")."""
+
+    filled_qty: float
+    avg_price: Optional[float]
+    status: str
+
+
 class Executor:
     name: str = ""
 
@@ -143,3 +156,11 @@ class Executor:
         actual balance. Paper/sim executors return None, so the worker falls
         back to settings.default_equity."""
         return None
+
+    # Optional broker-truth hooks. Base intentionally does NOT define
+    # get_broker_positions / get_order_status — their presence is the opt-in
+    # signal (worker.reconcile and worker.fill_reconcile check with getattr).
+    # A base implementation returning None would be ambiguous with "broker
+    # genuinely reports nothing". Live executors implement:
+    #   async def get_broker_positions(self) -> Optional[dict[str, float]]
+    #   async def get_order_status(self, external_id: str) -> Optional[BrokerOrderView]

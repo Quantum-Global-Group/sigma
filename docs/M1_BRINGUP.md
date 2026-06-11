@@ -45,7 +45,7 @@ done
 
 **Acceptance:** `\dt` lists `candles`, `positions`, `orders`, `exit_state`; `\d signal_history` shows `asset_class NOT NULL`.
 
-- [ ] **1.1 done**
+- [x] **1.1 done** — *2026-06-10:* Timescale Cloud + Upstash provisioned; `DATABASE_URL`/`REDIS_URL` verified reachable; migrations **001–013** applied to the cloud Postgres and verified (`trading_accounts` + house account row, `account_id` on positions/orders/exit_state, composite idempotency index). `fly secrets set` for both URLs still pending (needs `fly auth login`).
 
 ---
 
@@ -116,7 +116,7 @@ select count(*) from orders where executor='alpaca' and asset_class='equity';  -
 
 …and the same fills appear in the Alpaca paper dashboard.
 
-- [ ] **1.5 done**
+- [ ] **1.5 done** — config side complete: `apps/worker/fly.toml` already ships `WORKER_ASSET_CLASSES="equity"`, `EQUITY_EXECUTOR="alpaca"`, `ALPACA_PAPER="true"`, `EQUITY_DATA_PROVIDERS="alpaca,tiingo"`. Remaining: set Alpaca secrets on Fly + verify orders during RTH.
 
 ---
 
@@ -140,7 +140,7 @@ clear_cache(); m = resolve('crypto'); print(type(m).__name__)"
 # prints the RankingModel class, NOT a heuristic / None
 ```
 
-- [ ] **1.6 done**
+- [x] **1.6 done** — *2026-06-10:* `crypto_ranking_v1.0.pkl` trained + committed; `crypto_meta_v1.0.pkl` (n=1037, win_rate 0.528) image-baked too (Fly machines have no durable volume, so out-of-band copies don't survive restarts). Both dormant until crypto joins `WORKER_ASSET_CLASSES`. NOTE: the **equity** ensemble was REFUSED by the train gate (val 0.348 < majority 0.377) and pulled — equity trades the technical-only blend.
 
 ---
 

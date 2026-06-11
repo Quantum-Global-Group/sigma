@@ -36,3 +36,8 @@ apps/api/ml/saved_models/*.pt
 # registry silently falls back to _heuristic_predict.
 !apps/api/ml/saved_models/crypto_ranking_v1.0.pkl
 !apps/api/ml/saved_models/ranking_v1.0.pkl
+# Crypto meta-labeler (P(win) gate over the combiner side). Image-baked because
+# Fly machines have no durable volume — an out-of-band copy into MODEL_DIR
+# would vanish on every restart/redeploy. Dormant until crypto joins
+# WORKER_ASSET_CLASSES; resolve_meta() loads it by this exact name.
+!apps/api/ml/saved_models/crypto_meta_v1.0.pkl

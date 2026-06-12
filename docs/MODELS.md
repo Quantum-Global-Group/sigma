@@ -59,6 +59,18 @@ to `./ml/saved_models`; `version` defaults to `settings.model_version` (`v1.0`).
 > overfit). The registry resolves equity → None and the worker trades the
 > technical-only blend. A replacement ships as `equity_ensemble_{version}.pkl`
 > only when `train_models.py --ensemble` passes the gate.
+>
+> **Measured rejection (2026-06-12, `scripts/equity_feature_experiment.py`):**
+> the obvious fixes don't rescue it. Across 5 purged+embargoed CV folds
+> (`ml/cv.py`), normalizing the last raw price feature (atr_pct), extending
+> history to 7y (14k rows), regularizing the trees (train_acc 0.93→0.42), and
+> widening to a 30-name universe (43k rows) moved the edge from −2.9% to
+> +0.3% — inside fold noise, with rank-IC ≈ 0 everywhere. **The current
+> 19-feature technical set on daily bars has no measurable next-day
+> directional signal.** Future attempts should change the *problem*, not the
+> tuning: triple-barrier labels (`ml/triple_barrier.py`), return regression,
+> intraday bars, or non-price features. (Equity meta-labeling and
+> cross-sectional ranking were already measured REJECTs.)
 
 ## Training
 

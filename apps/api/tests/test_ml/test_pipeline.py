@@ -33,7 +33,7 @@ def _make_features() -> pd.DataFrame:
             "ema_50": [149.0],
             "ema_ratio": [1.013],
             "bb_width": [0.04],
-            "atr_14": [2.0],
+            "atr_pct": [2.0],
             "volume_ratio": [1.1],
             "ret_1d": [0.005],
             "ret_5d": [0.03],
@@ -77,7 +77,7 @@ class TestBuildFeatures:
     def test_all_expected_columns_present(self):
         df = _make_ohlcv()
         features = build_features(df)
-        expected = {"rsi_14", "roc_10", "ema_ratio", "bb_width", "atr_14", "volume_ratio",
+        expected = {"rsi_14", "roc_10", "ema_ratio", "bb_width", "atr_pct", "volume_ratio",
                     "ret_1d", "ret_5d", "zscore_20", "vol_regime", "rsi_7", "hl_range", "up_frac_10"}
         assert expected.issubset(set(features.columns))
 
@@ -124,7 +124,7 @@ class TestPredict:
         # Force the heuristic path: with a trained ensemble committed under
         # saved_models/, resolve('equity') would otherwise classify these
         # hand-crafted features per the model weights, defeating the intent.
-        features = pd.DataFrame([{"rsi_14": 20.0, "roc_10": 0.0, "ema_20": 100.0, "ema_50": 98.0, "ema_ratio": 1.02, "bb_width": 0.03, "atr_14": 1.0, "volume_ratio": 1.0, "ret_1d": 0.001, "ret_5d": 0.01}])
+        features = pd.DataFrame([{"rsi_14": 20.0, "roc_10": 0.0, "ema_20": 100.0, "ema_50": 98.0, "ema_ratio": 1.02, "bb_width": 0.03, "atr_pct": 1.0, "volume_ratio": 1.0, "ret_1d": 0.001, "ret_5d": 0.01}])
         with patch("ml.models.registry.resolve", return_value=None):
             result = predict(features)
         assert result.signal in ("BUY", "HOLD")
@@ -133,7 +133,7 @@ class TestPredict:
         # Force the heuristic path: the registry may load a saved ensemble
         # model from saved_models/ which would classify these features however
         # the trained weights say, defeating the test's intent.
-        features = pd.DataFrame([{"rsi_14": 85.0, "roc_10": 0.0, "ema_20": 98.0, "ema_50": 102.0, "ema_ratio": 0.96, "bb_width": 0.08, "atr_14": 2.0, "volume_ratio": 0.8, "ret_1d": -0.01, "ret_5d": -0.04}])
+        features = pd.DataFrame([{"rsi_14": 85.0, "roc_10": 0.0, "ema_20": 98.0, "ema_50": 102.0, "ema_ratio": 0.96, "bb_width": 0.08, "atr_pct": 2.0, "volume_ratio": 0.8, "ret_1d": -0.01, "ret_5d": -0.04}])
         with patch("ml.models.registry.resolve", return_value=None):
             result = predict(features)
         assert result.signal in ("SELL", "HOLD")

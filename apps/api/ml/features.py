@@ -37,7 +37,12 @@ def build_features(df: pd.DataFrame, headlines: list[str] | None = None) -> pd.D
     # Volatility
     out["bb_width"] = (rolling_std * 2) / rolling_mean
     out["bb_pct"]   = (close - (rolling_mean - rolling_std * 2)) / (rolling_std * 4 + 1e-10)
-    out["atr_14"]   = _atr(high, low, close, 14)
+    # ATR as a fraction of price — the raw dollar ATR was the last price-level
+    # feature left (a $200 stock's ATR dwarfs a $60 stock's), letting trees
+    # split on price level as a ticker-identity proxy. Renamed so any artifact
+    # trained on the old column fails loudly (KeyError → graceful no-model
+    # fallback) instead of predicting on silently shifted inputs.
+    out["atr_pct"]  = _atr(high, low, close, 14) / (close + 1e-10)
 
     # MACD histogram (normalized by price level for cross-symbol portability)
     macd_fast = close.ewm(span=12).mean()

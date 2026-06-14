@@ -88,16 +88,21 @@ have no edge after cost.** Do not re-litigate a REJECT without changing the
 | Forex mean-reversion family | `strategy_weight_fit.py` OOS | **REJECT** — in-sample only; −1.14 Sharpe on the hold-out |
 | Crypto meta-labeling | `crypto_meta_revalidate.py`, 75d/80k bets, OOS | **REJECT** — base win 48.1%; meta gating gives zero lift at any tau; net −8 to −11 bps/trade. The earlier "win" was trained on ~1 day of data (the 5m adapter caps history at 24h) |
 | Equity meta-labeling · cross-sectional ranking · funding rate | earlier alpha-research harnesses | **REJECT** (measured) |
+| Stat-arb (pairs mean-reversion) | `statarb_experiment.py`, 28 pairs / 2798 held-out trades | **REJECT** — net −6.45 bps/trade after 4bps 2-leg cost. (A first pass showed a fake 100%-win/+1292bps — survivorship bug: non-reverting losers were never booked. Stop-loss + forced-close fixed it.) |
+| Less-liquid technical | `illiquid_experiment.py`, 16 small/mid-caps @ 25bps | **REJECT** — blend net −25.5 bps/bar; wider spreads eat it, only beta positive |
+| **Event-driven news drift** | `event_drift_experiment.py`, Alpaca news + FinBERT, 1142 held-out trades | **QUALIFIED PASS / LEAD** — the only thesis to clear the gate, incl. market-neutralized. Strong-sentiment events: raw +44 bps/trade; **~half is beta** (long +113 / short −115 in an up-market); **market-neutral residual +21 bps/trade, 53.6% win, n=638**. Dose-response (strengthens with sentiment + a learned gate). Thin, and the beta-1 hedge is crude (under-removes high-beta names) → needs confirmation before capital. |
 
-**Net position (2026-06-15): SIGMA has no demonstrated out-of-sample,
-cost-aware edge in any asset class by any method tried.** The infrastructure
-(gates, reconciliation, accounts, measure-first harnesses) is sound; the alpha
-is not present in OHLCV-derived signals on liquid mega-cap equity / major crypto
-/ major forex. A future candidate is only worth building if it is *different in
-kind*: non-price data (the sentiment plumbing is unmeasured for edge),
-less-efficient universes, relative-value / options structure, or
-event/catalyst signals — not another technical rule or another weighting of the
-existing ones.
+**Net position (2026-06-16): no *price-only* signal has edge — but event-driven
+news drift is a genuine LEAD.** Every OHLCV-derived candidate (liquid or
+illiquid; directional, reweighted, meta-filtered, or market-neutral stat-arb)
+rejects out of sample after cost. The one survivor is **information, not price**:
+a residual post-news drift on strong-sentiment events that persists after
+beta removal — the only result to clear the pre-registered gate market-neutral.
+It is *thin* (~21 bps/trade, low Sharpe, half the raw edge was beta), so it earns
+deeper validation — **not deployment** — next: per-name beta hedge, an
+out-of-regime hold-out (does it survive 2018–2021, incl. the 2020 bear?), and
+intraday entry. Other future candidates must likewise be different in *kind*
+(other alt-data, events, options structure), not another price rule.
 
 **Operational consequence:** the nightly `fit_strategy_weights` job fits weights
 from in-sample `signal_history`; the OOS test above shows that overfits, so it

@@ -114,6 +114,26 @@ should keep equal weights (or be gated by a holdout) rather than ship fitted
 ones. And the worker should not trade the equity blend live as an alpha source —
 it is beta-minus.
 
+## The one deployable conclusion (`retail_portfolio_backtest.py`)
+
+The four surviving ideas combined into one monthly-rebalanced portfolio
+(diversified sleeves + 10-month trend filter to cash), 2005–2026 incl. 2008/2020/2022:
+
+| Strategy | CAGR | Sharpe | maxDD | 2008 |
+|---|---|---|---|---|
+| SPY buy & hold | **11.0%** | 0.78 | **−50.8%** | −36.8% |
+| 60/40 | 8.3% | 0.84 | −28.5% | −13.4% |
+| **Diversified + Trend** | 8.3% | **1.25** | **−12.5%** | **+8.0%** |
+| Equal-wt + Trend | 9.8% | 1.22 | −10.3% | +3.5% |
+
+**Verdict: a real, deployable, retail-implementable strategy — but it is
+risk-managed beta, not alpha.** Sharpe 1.25 vs 0.78 (SPY); max drawdown −12.5%
+vs −51%; *positive* in 2008. The honest trade-off: it gives up ~2–3%/yr of raw
+CAGR for ~⅓ the drawdown and half the volatility — a path most investors can
+actually stick with (vs panic-selling a −51% drawdown). It does not beat the
+market on raw return; it makes beta survivable. This is the realistic edge for a
+retail operator, and the only strategy in the program cleared for deployment.
+
 ## Training
 
 Data for all equity training flows through the unified adapter

@@ -47,6 +47,11 @@ async def _run_tick(asset_class: str) -> None:
     if asset_class == "option":
         from worker.options_tick import options_tick_once as _opt_tick
         await _opt_tick()
+    elif asset_class == "allocation":
+        # The deployable strategy: monthly trend-filtered diversified rebalance
+        # (docs/MODELS.md). Self-guards to act once per month.
+        from worker.allocation_tick import allocation_rebalance
+        await allocation_rebalance()
     else:
         from worker.tick import tick_once as _tick
         await _tick(asset_class)
@@ -59,6 +64,8 @@ def _interval_for(asset_class: str) -> int:
         return settings.worker_tick_seconds_option
     if asset_class == "forex":
         return settings.worker_tick_seconds_forex
+    if asset_class == "allocation":
+        return settings.worker_tick_seconds_allocation
     return settings.worker_tick_seconds_equity
 
 

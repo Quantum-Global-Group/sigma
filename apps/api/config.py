@@ -189,6 +189,21 @@ class Settings(BaseSettings):
     worker_tick_seconds_equity: int = 900
     worker_tick_seconds_option: int = 900
     worker_tick_seconds_forex: int = 900   # H4 bars → slow cadence is fine
+    worker_tick_seconds_allocation: int = 21_600  # 6h check; acts once per month
+
+    # ── Trend-filtered diversified allocation — the deployable strategy ──────
+    # The one strategy that cleared the cross-regime, cost-aware bar (risk-managed
+    # beta, not alpha): hold each diversified ETF sleeve only while above its
+    # N-month MA, else cash; rebalance monthly. See ml/allocation.py,
+    # scripts/retail_portfolio_backtest.py, docs/MODELS.md. Enable + put
+    # "allocation" in WORKER_ASSET_CLASSES (instead of "equity").
+    allocation_enabled: bool = False
+    allocation_weights: str = (
+        "SPY:0.30,EFA:0.10,EEM:0.05,TLT:0.15,IEF:0.10,GLD:0.10,DBC:0.05,VNQ:0.05"
+    )
+    allocation_ma_months: int = 10
+    allocation_min_trade_usd: float = 50.0
+    allocation_force: bool = False         # ignore the monthly guard (testing)
 
     # Offline full-run mode: when true the worker installs synthetic market-data
     # providers (sim/synthetic.py) so every asset class trades without network or

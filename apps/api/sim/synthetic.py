@@ -36,6 +36,7 @@ def _series(n: int, start: float, end: float, *, freq: str, wobble: float = 0.5,
             seed_key: str = "") -> pd.DataFrame:
     """Deterministic OHLCV with a gentle trend + noise, indexed to ~now."""
     idx = pd.date_range(end=datetime.now(timezone.utc), periods=n, freq=freq, tz="UTC")
+    n = len(idx)   # business-day freq can yield n∓1 on some date boundaries — match it
     rng = np.random.default_rng(abs(hash(seed_key)) % (2**32))
     close = np.linspace(start, end, n) + np.sin(np.arange(n) / 5.0) * wobble + rng.normal(0, wobble / 3, n)
     close = np.maximum(close, 0.01)

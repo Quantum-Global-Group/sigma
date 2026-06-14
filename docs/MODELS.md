@@ -72,6 +72,39 @@ to `./ml/saved_models`; `version` defaults to `settings.model_version` (`v1.0`).
 > intraday bars, or non-price features. (Equity meta-labeling and
 > cross-sectional ranking were already measured REJECTs.)
 
+## Measured-edge scoreboard (start here before proposing a model)
+
+Every alpha candidate tried in this program, with its honest out-of-sample
+verdict. The pattern is consistent: **price-only signals on liquid instruments
+have no edge after cost.** Do not re-litigate a REJECT without changing the
+*kind* of signal — re-running the same idea reproduces the same result.
+
+| Candidate | Method | Verdict |
+|---|---|---|
+| Equity ML ensemble | `train_gate.py` chronological holdout | **REJECT** — val 0.348 < majority 0.377 (overfit) |
+| Equity feature/model variants | `equity_feature_experiment.py`, purged CV | **REJECT** — edge ≈ 0, rank-IC ≈ 0 across atr_pct / 7y / regularized / 30-name |
+| 11 technical strategies (per-strategy) | `strategy_edge_experiment.py`, net of cost | **REJECT** — coin-flip hit rates; only equity *beta* (buy & hold) is positive |
+| Strategy reweighting / selection | `strategy_weight_fit.py`, train/test split | **REJECT** — edge-weighting fit on past data is *worse* than equal-weight OOS, on equity and forex |
+| Forex mean-reversion family | `strategy_weight_fit.py` OOS | **REJECT** — in-sample only; −1.14 Sharpe on the hold-out |
+| Crypto meta-labeling | `crypto_meta_revalidate.py`, 75d/80k bets, OOS | **REJECT** — base win 48.1%; meta gating gives zero lift at any tau; net −8 to −11 bps/trade. The earlier "win" was trained on ~1 day of data (the 5m adapter caps history at 24h) |
+| Equity meta-labeling · cross-sectional ranking · funding rate | earlier alpha-research harnesses | **REJECT** (measured) |
+
+**Net position (2026-06-15): SIGMA has no demonstrated out-of-sample,
+cost-aware edge in any asset class by any method tried.** The infrastructure
+(gates, reconciliation, accounts, measure-first harnesses) is sound; the alpha
+is not present in OHLCV-derived signals on liquid mega-cap equity / major crypto
+/ major forex. A future candidate is only worth building if it is *different in
+kind*: non-price data (the sentiment plumbing is unmeasured for edge),
+less-efficient universes, relative-value / options structure, or
+event/catalyst signals — not another technical rule or another weighting of the
+existing ones.
+
+**Operational consequence:** the nightly `fit_strategy_weights` job fits weights
+from in-sample `signal_history`; the OOS test above shows that overfits, so it
+should keep equal weights (or be gated by a holdout) rather than ship fitted
+ones. And the worker should not trade the equity blend live as an alpha source —
+it is beta-minus.
+
 ## Training
 
 Data for all equity training flows through the unified adapter

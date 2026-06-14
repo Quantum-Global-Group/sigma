@@ -90,19 +90,20 @@ have no edge after cost.** Do not re-litigate a REJECT without changing the
 | Equity meta-labeling · cross-sectional ranking · funding rate | earlier alpha-research harnesses | **REJECT** (measured) |
 | Stat-arb (pairs mean-reversion) | `statarb_experiment.py`, 28 pairs / 2798 held-out trades | **REJECT** — net −6.45 bps/trade after 4bps 2-leg cost. (A first pass showed a fake 100%-win/+1292bps — survivorship bug: non-reverting losers were never booked. Stop-loss + forced-close fixed it.) |
 | Less-liquid technical | `illiquid_experiment.py`, 16 small/mid-caps @ 25bps | **REJECT** — blend net −25.5 bps/bar; wider spreads eat it, only beta positive |
-| **Event-driven news drift** | `event_drift_experiment.py`, Alpaca news + FinBERT, 1142 held-out trades | **QUALIFIED PASS / LEAD** — the only thesis to clear the gate, incl. market-neutralized. Strong-sentiment events: raw +44 bps/trade; **~half is beta** (long +113 / short −115 in an up-market); **market-neutral residual +21 bps/trade, 53.6% win, n=638**. Dose-response (strengthens with sentiment + a learned gate). Thin, and the beta-1 hedge is crude (under-removes high-beta names) → needs confirmation before capital. |
+| Event-driven news drift | `event_drift_experiment.py`, Alpaca news + FinBERT, per-name β, two regimes | **REJECT (regime-dependent)** — looked like a lead, failed the acid test. 2023–2025 bull window: market-neutral strong +20 bps/trade (53% win). **2018–2021 (incl. the 2020 bear): market-neutral strong −7.4 bps/trade, 46% win** — below a coin flip. The ~20 bps was bull-regime momentum, not durable alpha; it does not survive out of regime. |
 
-**Net position (2026-06-16): no *price-only* signal has edge — but event-driven
-news drift is a genuine LEAD.** Every OHLCV-derived candidate (liquid or
-illiquid; directional, reweighted, meta-filtered, or market-neutral stat-arb)
-rejects out of sample after cost. The one survivor is **information, not price**:
-a residual post-news drift on strong-sentiment events that persists after
-beta removal — the only result to clear the pre-registered gate market-neutral.
-It is *thin* (~21 bps/trade, low Sharpe, half the raw edge was beta), so it earns
-deeper validation — **not deployment** — next: per-name beta hedge, an
-out-of-regime hold-out (does it survive 2018–2021, incl. the 2020 bear?), and
-intraday entry. Other future candidates must likewise be different in *kind*
-(other alt-data, events, options structure), not another price rule.
+**Net position (2026-06-16): SIGMA has NO demonstrated durable edge by any method
+tried — price-based or alt-data.** Every candidate rejects out of sample after
+cost: all OHLCV-derived signals (directional, reweighted, meta-filtered,
+stat-arb, illiquid) and the one information-based lead (news drift), which passed
+in a bull window but flipped negative market-neutral across a bear regime. The
+out-of-regime + per-name-beta test is the gold standard and it closed the last
+door. A future candidate must be different in *kind* AND survive a market-neutral,
+cross-regime hold-out — generic daily-news polarity is exhausted; only narrower,
+faster, or genuinely different signals remain plausible (specific event types —
+earnings surprise / guidance / M&A — intraday reaction, less-covered universes,
+options structure). The measurement bar any of them must clear is now codified in
+`ml/edge_eval.py` + the per-name-β / cross-regime protocol here.
 
 **Operational consequence:** the nightly `fit_strategy_weights` job fits weights
 from in-sample `signal_history`; the OOS test above shows that overfits, so it

@@ -90,20 +90,23 @@ have no edge after cost.** Do not re-litigate a REJECT without changing the
 | Equity meta-labeling · cross-sectional ranking · funding rate | earlier alpha-research harnesses | **REJECT** (measured) |
 | Stat-arb (pairs mean-reversion) | `statarb_experiment.py`, 28 pairs / 2798 held-out trades | **REJECT** — net −6.45 bps/trade after 4bps 2-leg cost. (A first pass showed a fake 100%-win/+1292bps — survivorship bug: non-reverting losers were never booked. Stop-loss + forced-close fixed it.) |
 | Less-liquid technical | `illiquid_experiment.py`, 16 small/mid-caps @ 25bps | **REJECT** — blend net −25.5 bps/bar; wider spreads eat it, only beta positive |
-| Event-driven news drift | `event_drift_experiment.py`, Alpaca news + FinBERT, per-name β, two regimes | **REJECT (regime-dependent)** — looked like a lead, failed the acid test. 2023–2025 bull window: market-neutral strong +20 bps/trade (53% win). **2018–2021 (incl. the 2020 bear): market-neutral strong −7.4 bps/trade, 46% win** — below a coin flip. The ~20 bps was bull-regime momentum, not durable alpha; it does not survive out of regime. |
+| Event-driven news drift | `event_drift_experiment.py`, Alpaca news + FinBERT, per-name β, two regimes | **REJECT (regime-dependent)** — looked like a lead, failed the acid test. 2023–2025 bull: market-neutral strong +20 bps/trade (53% win). **2018–2021 (incl. the 2020 bear): −7.4 bps/trade, 46% win** — below a coin flip. Bull-regime momentum, not durable alpha. |
+| **Trend-filtered diversified beta** | `cross_asset_experiment.py`, 26 ETFs/crypto, 2005–2026 monthly | **PASS (smart beta, not alpha)** — long each asset only above its N-month MA, else cash. Sharpe **0.98 vs 0.72 buy&hold**; robust across MA 7–12m; **stable both halves (0.85 → 1.05, no decay)**; 2008 −4% vs −25%, maxDD **9% vs 43%**. The ONLY result to clear the cross-regime bar. It is *timing of market exposure* (risk-managed beta), not market-neutral alpha. |
 
-**Net position (2026-06-16): SIGMA has NO demonstrated durable edge by any method
-tried — price-based or alt-data.** Every candidate rejects out of sample after
-cost: all OHLCV-derived signals (directional, reweighted, meta-filtered,
-stat-arb, illiquid) and the one information-based lead (news drift), which passed
-in a bull window but flipped negative market-neutral across a bear regime. The
-out-of-regime + per-name-beta test is the gold standard and it closed the last
-door. A future candidate must be different in *kind* AND survive a market-neutral,
-cross-regime hold-out — generic daily-news polarity is exhausted; only narrower,
-faster, or genuinely different signals remain plausible (specific event types —
-earnings surprise / guidance / M&A — intraday reaction, less-covered universes,
-options structure). The measurement bar any of them must clear is now codified in
-`ml/edge_eval.py` + the per-name-β / cross-regime protocol here.
+**Net position (2026-06-16): no market-neutral ALPHA exists in anything tested —
+but risk-managed BETA does, robustly.** Every market-neutral / directional alpha
+candidate rejects out of sample after cost (ML, all technical, reweighting,
+stat-arb, illiquid, news drift). The one thing that survives the cross-regime bar
+is *smart beta*: a broadly-diversified long book (buy&hold Sharpe 0.72) overlaid
+with a simple trend filter to sidestep crashes (Sharpe ~0.98, maxDD 9% vs 43%) —
+robust to the MA length and across both halves incl. 2008/2020/2022. Its value is
+**drawdown/crisis protection + behavioral discipline, not excess return** (it
+slightly underperforms buy&hold in relentless bulls). For a retail operator this
+is the realistic edge: diversify, don't overtrade, trend-filter exposure. Any
+*alpha* candidate must still be different in *kind* AND clear the market-neutral
+cross-regime bar (codified in `ml/edge_eval.py` + the protocols here); the
+remaining untested ones (earnings-surprise drift, intraday reaction, less-covered
+universes, options structure) have lower priors.
 
 **Operational consequence:** the nightly `fit_strategy_weights` job fits weights
 from in-sample `signal_history`; the OOS test above shows that overfits, so it

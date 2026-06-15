@@ -198,12 +198,28 @@ class Settings(BaseSettings):
     # scripts/retail_portfolio_backtest.py, docs/MODELS.md. Enable + put
     # "allocation" in WORKER_ASSET_CLASSES (instead of "equity").
     allocation_enabled: bool = False
+    # One-Alpaca-account universe: every sleeve is an Alpaca-tradeable ETF —
+    # incl. currencies (UUP=USD, FXE=euro) and Bitcoin (IBIT), so no OANDA or
+    # Coinbase account is needed. (Backtest validates with BTC-USD as the IBIT
+    # price proxy, since IBIT only lists from 2024.)
     allocation_weights: str = (
-        "SPY:0.30,EFA:0.10,EEM:0.05,TLT:0.15,IEF:0.10,GLD:0.10,DBC:0.05,VNQ:0.05"
+        "SPY:0.28,EFA:0.08,EEM:0.04,TLT:0.13,IEF:0.10,GLD:0.10,DBC:0.05,"
+        "VNQ:0.05,UUP:0.05,FXE:0.03,IBIT:0.04"
     )
     allocation_ma_months: int = 10
     allocation_min_trade_usd: float = 50.0
     allocation_force: bool = False         # ignore the monthly guard (testing)
+
+    # ── Options income sleeve — defined-risk vol-premium harvesting ─────────
+    # Sell a capped-risk put credit spread on the underlying for monthly income
+    # (ml/options_income.py). The volatility risk premium is real but must be
+    # defined-risk (see vol_premium_experiment.py). Strategy brain is built;
+    # live execution needs an Alpaca options path (multi-leg) — not wired yet.
+    options_income_enabled: bool = False
+    options_income_underlying: str = "SPY"
+    options_income_sleeve_frac: float = 0.10   # capped risk = 10% of equity
+    options_income_otm_pct: float = 0.05       # short strike ~5% below spot
+    options_income_width_pct: float = 0.02     # spread width ~2% of spot
 
     # Offline full-run mode: when true the worker installs synthetic market-data
     # providers (sim/synthetic.py) so every asset class trades without network or

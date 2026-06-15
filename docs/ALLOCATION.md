@@ -16,6 +16,25 @@ Once a month, for each sleeve:  price > 10-month average ?
     no  → move that weight to cash
 ```
 
+## One Alpaca account — no OANDA, no Coinbase
+
+Every sleeve is an Alpaca-tradeable ETF, so a single brokerage covers all asset
+classes. Currency and crypto exposure come through ETF "wrappers" instead of
+separate forex/crypto accounts:
+
+| Exposure | Sleeve(s) |
+|---|---|
+| US / foreign / EM equity | SPY · EFA · EEM |
+| Bonds | TLT · IEF |
+| Gold / commodities | GLD · DBC |
+| Real estate | VNQ |
+| **Currencies** (no OANDA) | **UUP** (USD) · **FXE** (euro) |
+| **Bitcoin** (no Coinbase) | **IBIT** |
+
+(The backtest validates the Bitcoin sleeve with `BTC-USD` as the price proxy —
+`IBIT` only lists from 2024 but tracks the same asset.) Same one-question method
+applies to every sleeve.
+
 ## Why this and nothing else
 
 After a research program where every market-neutral / directional alpha candidate
@@ -69,13 +88,35 @@ worker logs `[allocation] YYYY-MM ... orders=N` and `orders` rows appear with th
 sleeve symbols; `select symbol, qty from positions where closed=false` matches the
 in-trend sleeves.
 
+## The income add-on — options premium (defined-risk)
+
+On top of the core, a small **options sleeve** harvests the one *structural* edge
+that survives in the options asset class: the volatility risk premium. People
+overpay for crash insurance, so *selling* it pays — but only if your loss is
+**capped** (naked short vol drew down −92% in the research, `vol_premium_experiment.py`).
+
+The strategy brain is built (`ml/options_income.py`, `select_put_credit_spread`):
+given the underlying and a small risk budget (≈10% of equity), it picks a
+**put credit spread** — sell a put ~5% below the market, buy a further put that
+**caps the max loss** — and sizes contracts so the worst case can't exceed the
+budget. Settings: `options_income_*` in config. Collect a premium most months;
+a crash costs the bounded spread width, never more.
+
+**Not yet wired for live trading.** Execution needs an Alpaca *options* path
+(multi-leg orders + chain quotes); the current options executor is Moomoo/OpenD
+(local), which would break the one-account goal. That executor + a monthly
+options-income tick is the next build. It also can't be cross-regime backtested
+(Alpaca options history is ~2y) — the VXX vol-premium test is the evidence; it
+runs paper-first.
+
 ## Honest limits / follow-ups
 
 - **Smart beta, not alpha.** Don't market the drawdown reduction as outperformance.
-- **No crypto sleeve in v1.** The backtest's 5% BTC needs >10 months of daily
-  history; the Coinbase adapter caps daily at 180 days. Add via a deep-fetch
-  before re-including it.
 - **One book.** Allocation and the directional equity tick must not both run —
   they'd both manage equity positions in the house account.
+- **Bitcoin sleeve uses `IBIT`** live (Alpaca ETF); the backtest proxies it with
+  `BTC-USD` since IBIT only lists from 2024.
+- **Options income execution** is built as the brain only; the Alpaca multi-leg
+  options executor is the next step.
 - Same as the rest of the system: **paper until the cross-regime bar is honored
-  in production**; this strategy is the only one that has cleared it.
+  in production**; the allocation is the only strategy that has cleared it.

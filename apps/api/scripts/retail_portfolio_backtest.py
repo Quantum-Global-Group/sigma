@@ -44,14 +44,17 @@ COST = 5.0 / 1e4
 MA = 10
 CASH = "SHY"            # cash proxy (1–3y treasuries) for "out" sleeves
 
-# Fixed, un-optimized allocation (a defensible all-weather-ish split; the point
-# is the method, not these weights — an equal-weight version is shown too).
+# One-Alpaca-account allocation: every sleeve is an Alpaca-tradeable ETF, incl.
+# currencies (UUP/FXE — no OANDA needed) and Bitcoin (IBIT in production; the
+# backtest uses BTC-USD as the price proxy since IBIT only lists from 2024).
+# Fixed, un-optimized weights — the method matters, not the exact split.
 SLEEVES = {
-    "SPY": 0.30, "EFA": 0.10, "EEM": 0.05,     # equity 45%
-    "TLT": 0.15, "IEF": 0.10,                   # bonds 25%
+    "SPY": 0.28, "EFA": 0.08, "EEM": 0.04,     # equity 40%
+    "TLT": 0.13, "IEF": 0.10,                   # bonds 23%
     "GLD": 0.10, "DBC": 0.05,                   # real assets 15%
     "VNQ": 0.05,                                # reit 5%
-    "BTC-USD": 0.05,                            # a little crypto 5%
+    "UUP": 0.05, "FXE": 0.03,                   # currencies via ETFs 8% (no OANDA)
+    "BTC-USD": 0.04,                            # Bitcoin 4% (IBIT live; BTC proxy here)
 }
 
 
@@ -79,7 +82,7 @@ def monthly_close(symbol):
     if os.path.exists(path):
         d = json.load(open(path))
         if d:
-            return pd.Series({pd.Timestamp(k): v for k, v in d.items()})
+            return pd.Series({pd.Timestamp(k): v for k, v in d.items()})  # tz-naive
     if symbol.endswith("-USD"):
         df = _deep_crypto_daily(symbol)
     else:
@@ -93,6 +96,8 @@ def monthly_close(symbol):
     if df is None or len(df) < 60:
         return None
     m = df["close"].astype(float).resample("ME").last()
+    if getattr(m.index, "tz", None) is not None:
+        m.index = m.index.tz_localize(None)   # match the tz-naive cache path
     json.dump({str(k.date()): float(v) for k, v in m.items() if pd.notna(v)}, open(path, "w"))
     return m
 
